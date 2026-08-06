@@ -1,32 +1,61 @@
-# Viral Video Recreation Agent 🚀
+# AI Video Marketing Agent Skills 🚀
 
-AI agent for analyzing and recreating viral short videos.
+AI agent skills for creating, analyzing, and automating short-form marketing videos.
 
 Designed for:
+
 - TikTok Ads
-- UGC marketing videos
-- E-commerce creatives
-- AI video generation workflows
+- UGC Marketing Videos
+- E-commerce Creatives
+- AI Video Generation Workflows
 
 
-## Features
+## Included Skills
+
+
+### recreate-video-system
+
+AI agent system for analyzing and recreating viral short videos.
+
+Capabilities:
 
 - Analyze viral short videos
 - Extract video structure and marketing logic
-- Identify creators, products and scenes
+- Identify creators, products, and scenes
 - Generate structured AI video prompts
 - Maintain creator consistency across segments
 
 
+### ugc-product-video
+
+AI agent skill for creating UGC product marketing videos.
+
+Capabilities:
+
+- Generate product-focused video workflows
+- Create AI marketing video prompts
+- Automate UGC video production
+
+
 ## Workflow
+
+
 Video Input
+
 ↓
+
 AI Video Analysis
+
 ↓
+
 Structured Video Assets
+
 ↓
+
 Prompt Generation
+
 ↓
+
 AI Video Generation
 
 
@@ -40,6 +69,7 @@ AI Video Generation
 
 ## Example
 
+
 Input:
 
 A viral product advertisement video
@@ -49,8 +79,10 @@ Output:
 
 - Scene breakdown
 - Creator profile
+- Product analysis
 - AI generation prompts
-- AI video
+- AI video production workflow
+
 
 ## Roadmap
 
@@ -58,33 +90,61 @@ Output:
 - [x] Structured prompt generation
 - [ ] Web interface
 - [ ] Multi-agent workflow
+- [ ] More AI video model integrations
 
 
 ## Commercial Version
 
-For production AI marketing video creation:
+For production-scale AI marketing video creation:
 
-Lingzhi AI Studio
-
-
-
-# 爆款短视频复刻 AI Agent 🚀
-
-AI Agent 系统，用于分析和复刻爆款短视频。
-
-通过 AI 分析视频内容，提取视频结构、营销逻辑、人物、产品和场景信息，并生成 AI 视频生产所需的结构化资产和提示词。
+**Lingzhi AI Studio**
 
 
-## 核心能力
+
+---
+
+# AI 视频营销 Agent Skills 🚀
+
+用于创建、分析和自动化短视频营销内容的 AI Agent Skill 集合。
+
+
+适用于：
+
+- TikTok 广告
+- UGC 带货视频
+- 电商营销素材
+- AI 视频生产流程
+
+
+## 包含 Skill
+
+
+### recreate-video-system
+
+用于爆款短视频分析与复刻的 AI Agent 系统。
+
+核心能力：
 
 - 分析爆款短视频
 - 提取视频结构和营销逻辑
 - 识别人物、产品和场景
 - 生成结构化 AI 视频提示词
-- 保持多 Segment 视频中的人物一致性
+- 保持多 Segment 视频人物一致性
+
+
+### ugc-product-video
+
+用于生成 UGC 商品营销视频的 AI Agent Skill。
+
+核心能力：
+
+- 商品视频生成流程
+- UGC 视频创意生成
+- AI 营销视频自动化生产
 
 
 ## 工作流程
+
 
 视频输入
 
@@ -115,6 +175,7 @@ AI 视频生成
 
 ## 示例
 
+
 输入：
 
 一个爆款电商产品广告视频
@@ -124,8 +185,9 @@ AI 视频生成
 
 - 视频场景拆解
 - 人物角色分析
+- 产品信息分析
 - AI 视频生成提示词
-- AI 视频生产方案
+- 视频生产方案
 
 
 ## Roadmap
@@ -134,11 +196,11 @@ AI 视频生成
 - [x] 结构化提示词生成
 - [ ] Web 界面
 - [ ] Multi-Agent 工作流
+- [ ] 更多 AI 视频模型支持
 
 
 ## 商业版本
 
 面向企业和商业场景的 AI 营销视频生产平台：
 
-Lingzhi AI Studio
-
+**Lingzhi AI Studio**
