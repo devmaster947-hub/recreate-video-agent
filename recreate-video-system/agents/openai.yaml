@@ -1,4 +1,0 @@
-interface:
-  display_name: "爆款视频复刻"
-  short_description: "支持官方 Seedance 与灵智 CLI 的爆款视频复刻"
-  default_prompt: "使用 $recreate-video-system 拆解并复刻这支对标视频。"
