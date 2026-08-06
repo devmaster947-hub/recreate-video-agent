@@ -1,0 +1,4 @@
+interface:
+  display_name: "UGC Product Video"
+  short_description: "Create one or multiple localized UGC product videos"
+  default_prompt: "Use $ugc-product-video to turn my product images into one or multiple independent localized TikTok/Douyin UGC product videos."
