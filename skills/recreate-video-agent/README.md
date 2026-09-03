@@ -1,4 +1,4 @@
-# recreate-video-system
+# recreate-video-agent
 
 版本：**v5.13-server-core**
 
@@ -19,20 +19,20 @@
 克隆仓库，或通过 GitHub 下载仓库 ZIP 并解压：
 
 ```sh
-git clone https://github.com/devmaster947-hub/viral-video-recreation-agent.git
+git clone https://github.com/devmaster947-hub/recreate-video-agent.git
 ```
 
-将仓库中的 `skills/recreate-video-system` 完整目录复制到 Codex 的用户技能目录：
+将仓库中的 `skills/recreate-video-agent` 完整目录复制到 Codex 的用户技能目录：
 
-- 默认目录：`~/.codex/skills/recreate-video-system/`
-- 若设置了 `CODEX_HOME`：`$CODEX_HOME/skills/recreate-video-system/`
+- 默认目录：`~/.codex/skills/recreate-video-agent/`
+- 若设置了 `CODEX_HOME`：`$CODEX_HOME/skills/recreate-video-agent/`
 
 确保目录内直接包含 `SKILL.md`、`agents/`、`scripts/`、`references/`、`core/`、`utils/` 和 `cli/`。替换已有同名技能前，请将旧目录完整备份到技能目录之外。
 
 安装后在下一轮 Codex 对话中调用：
 
 ```text
-$recreate-video-system 帮我复刻这个产品视频
+$recreate-video-agent 帮我复刻这个产品视频
 ```
 
 同时提供对标视频；如需替换产品或达人，附上对应参考图。
@@ -64,4 +64,4 @@ $recreate-video-system 帮我复刻这个产品视频
 | `cli/` | macOS ARM64 与 Windows x64 的 LZStudio CLI |
 | `tests/` | 随技能提供的测试用例 |
 
-本次发布的技能文件与用户提供的 v5.13-server-core 安装包一致，另增加此发布说明和 Git 忽略规则。
+本版本基于 v5.13-server-core 安装包，将技能名称与调用名统一为 `recreate-video-agent`，并兼容旧名称保存的技能优化方案。

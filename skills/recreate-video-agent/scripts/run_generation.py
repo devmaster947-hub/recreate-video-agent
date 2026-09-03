@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run only Step 5 from a completed recreate-video-system v4 manifest."""
+"""Run only Step 5 from a completed recreate-video-agent v4 manifest."""
 
 from __future__ import annotations
 

@@ -19,7 +19,7 @@
 {
   "proposalVersion": "1.0",
   "candidateId": "candidate-01",
-  "targetSkill": "recreate-video-system",
+  "targetSkill": "recreate-video-agent",
   "summary": "",
   "issues": [
     {
@@ -51,7 +51,7 @@
 }
 ```
 
-新方案必须写`targetSkill: "recreate-video-system"`。重命名前已经保存的`recreate-product-video`和`recreate-product-video-v4`方案仅作为已有任务兼容值读取，不再用于新方案。
+新方案必须写`targetSkill: "recreate-video-agent"`。重命名前已经保存的`recreate-video-system`、`recreate-product-video`和`recreate-product-video-v4`方案仅作为已有任务兼容值读取，不再用于新方案。
 
 每条finding索引和每个hardFailure代码必须被issue覆盖；issue ID和change ID不得重复。每个`skill_actionable` issue必须被至少一个change引用，change不得引用其他分类。`exclusions`必须恰好覆盖全部非`skill_actionable` issue。
 

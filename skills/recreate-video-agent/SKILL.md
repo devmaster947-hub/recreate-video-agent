@@ -1,9 +1,9 @@
 ---
-name: recreate-video-system
+name: recreate-video-agent
 description: 通过统一《复刻要求确认单》一次选择产品、达人、模型等启动配置后，按“分段真实帧故事板→可选整板产品/达人替换→服务端拆解与重构提示词→用户确认→视频生成与质检”高保真复刻 TikTok、抖音等产品视频；核心拆解与提示词逻辑由灵智工作流执行。不用于从文字重做 Storyboard 或自由创作 Hook。
 ---
 
-# recreate-video-system v5.13-server-core
+# recreate-video-agent v5.13-server-core
 
 正式流程固定为五步：
 

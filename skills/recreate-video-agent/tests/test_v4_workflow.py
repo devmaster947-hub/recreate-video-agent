@@ -110,7 +110,7 @@ def optimization_proposal(candidate_id: str = "candidate-01") -> dict:
     return {
         "proposalVersion": "1.0",
         "candidateId": candidate_id,
-        "targetSkill": "recreate-video-system",
+        "targetSkill": "recreate-video-agent",
         "summary": "收紧可通用的首帧约束。",
         "issues": [
             {"issueId": "issue-first-frame", "sourceFindingIndices": [0], "hardFailureCodes": ["first_frame_structure_mismatch"], "classification": "skill_actionable", "evidence": "首帧结构偏移。", "reason": "现有参考职责缺少独立首帧输入。"},
@@ -129,10 +129,10 @@ class StoryboardDrivenWorkflowTest(unittest.TestCase):
     def test_skill_identity_and_ui_metadata(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         metadata = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        self.assertIn("name: recreate-video-system\n", skill)
-        self.assertIn("# recreate-video-system v5.13-server-core", skill)
-        self.assertIn('display_name: "recreate-video-system v5.13-server-core"', metadata)
-        self.assertIn("$recreate-video-system ", metadata)
+        self.assertIn("name: recreate-video-agent\n", skill)
+        self.assertIn("# recreate-video-agent v5.13-server-core", skill)
+        self.assertIn('display_name: "recreate-video-agent v5.13-server-core"', metadata)
+        self.assertIn("$recreate-video-agent ", metadata)
         self.assertNotIn("$recreate-product-video-v4", metadata)
 
     def test_compact_confirmation_contract(self):
@@ -460,9 +460,11 @@ class StoryboardDrivenWorkflowTest(unittest.TestCase):
     def test_skill_proposal_requires_complete_classification_and_safe_paths(self):
         report = {"status": "failed", "passed": False, "findings": ["首帧偏移", "水印"], "hardFailures": ["first_frame_structure_mismatch", "watermark_present"]}
         self.assertEqual(generation_manifest.validate_skill_optimization_proposal(optimization_proposal(), report, "candidate-01")["status"], "proposed")
-        legacy = optimization_proposal()
-        legacy["targetSkill"] = "recreate-product-video"
-        self.assertEqual(generation_manifest.validate_skill_optimization_proposal(legacy, report, "candidate-01")["status"], "proposed")
+        for legacy_name in ("recreate-video-system", "recreate-product-video", "recreate-product-video-v4"):
+            with self.subTest(target_skill=legacy_name):
+                legacy = optimization_proposal()
+                legacy["targetSkill"] = legacy_name
+                self.assertEqual(generation_manifest.validate_skill_optimization_proposal(legacy, report, "candidate-01")["status"], "proposed")
         unknown_target = optimization_proposal()
         unknown_target["targetSkill"] = "unrelated-video-skill"
         with self.assertRaisesRegex(ValueError, "targetSkill"):
@@ -495,7 +497,7 @@ class StoryboardDrivenWorkflowTest(unittest.TestCase):
             skill_root = root / "skill"
             skill_root.mkdir()
             skill_file = skill_root / "SKILL.md"
-            skill_file.write_text("# recreate-video-system v5.8\n", encoding="utf-8")
+            skill_file.write_text("# recreate-video-agent v5.8\n", encoding="utf-8")
             manifest = generation_manifest.command_init(argparse.Namespace(output_root=str(root), task_id="stale", reuse=False))
             report = root / "quality.json"
             report.write_text(json.dumps({"status": "failed", "passed": False, "findings": ["首帧偏移", "水印"], "hardFailures": ["first_frame_structure_mismatch", "watermark_present"]}), encoding="utf-8")
@@ -504,7 +506,7 @@ class StoryboardDrivenWorkflowTest(unittest.TestCase):
             with patch.object(generation_manifest, "SKILL_ROOT", skill_root):
                 generation_manifest.set_quality_report(manifest, "candidate-01", str(report))
                 generation_manifest.set_skill_optimization_proposal(manifest, "candidate-01", str(proposal))
-                skill_file.write_text("# recreate-video-system v5.8\nchanged\n", encoding="utf-8")
+                skill_file.write_text("# recreate-video-agent v5.8\nchanged\n", encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "确认失效"):
                     skill_optimization.snapshot(manifest, "candidate-01", proposal)
             loaded = generation_manifest.load_manifest(manifest)
@@ -516,7 +518,7 @@ class StoryboardDrivenWorkflowTest(unittest.TestCase):
             skill_root = root / "skill"
             skill_root.mkdir()
             skill_file = skill_root / "SKILL.md"
-            original = "# recreate-video-system v5.8\n"
+            original = "# recreate-video-agent v5.8\n"
             skill_file.write_text(original, encoding="utf-8")
             manifest = generation_manifest.command_init(argparse.Namespace(output_root=str(root), task_id="rollback", reuse=False))
             report = root / "quality.json"
@@ -529,7 +531,7 @@ class StoryboardDrivenWorkflowTest(unittest.TestCase):
                 generation_manifest.set_quality_report(manifest, "candidate-01", str(report))
                 generation_manifest.set_skill_optimization_proposal(manifest, "candidate-01", str(proposal))
                 skill_optimization.snapshot(manifest, "candidate-01", proposal)
-                skill_file.write_text("# recreate-video-system v5.9\nbroken\n", encoding="utf-8")
+                skill_file.write_text("# recreate-video-agent v5.9\nbroken\n", encoding="utf-8")
                 skill_optimization.rollback(manifest, "candidate-01", proposal)
                 generation_manifest.set_skill_optimization_result(manifest, "candidate-01", str(proposal), "rolled_back", str(validation))
             self.assertEqual(skill_file.read_text(encoding="utf-8"), original)

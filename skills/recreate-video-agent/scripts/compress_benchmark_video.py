@@ -128,7 +128,7 @@ def prepare_benchmark_video(
     directory = (
         Path(output_dir).expanduser().resolve()
         if output_dir is not None
-        else Path(tempfile.gettempdir()) / "recreate-video-system" / "benchmark-uploads"
+        else Path(tempfile.gettempdir()) / "recreate-video-agent" / "benchmark-uploads"
     )
     output = _available_output(source, directory)
     passlog = output.with_suffix("").with_name(output.stem + "-passlog")
@@ -214,7 +214,7 @@ def prepare_upload_image(
     directory = (
         Path(output_dir).expanduser().resolve()
         if output_dir is not None
-        else Path(tempfile.gettempdir()) / "recreate-video-system" / "image-uploads"
+        else Path(tempfile.gettempdir()) / "recreate-video-agent" / "image-uploads"
     )
     output = _available_output(source, directory, suffix=".jpg")
     last_error = "FFmpeg 未生成有效文件。"
