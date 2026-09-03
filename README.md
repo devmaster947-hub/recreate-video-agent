@@ -17,7 +17,7 @@ Designed for:
 
 AI agent system for analyzing and recreating viral short videos.
 
-Current version: **v5.13-server-core**. Extracts segmented 4×4 source-frame storyboards, supports product and creator replacement, and uses the Lingzhi server workflow for Gemini analysis and GPT prompt reconstruction. Video generation follows local validation and user approval.
+Current version: **v5.13**. Extracts segmented 4×4 source-frame storyboards, supports product and creator replacement, and uses the Lingzhi server workflow for Gemini analysis and GPT prompt reconstruction. Video generation follows local validation and user approval.
 
 See the [installation and usage guide](skills/recreate-video-agent/README.md) and [skill instructions](skills/recreate-video-agent/SKILL.md). Requires a Lingzhi API key and a compatible `recreate-video-prompt` server workflow; installing the skill does not deploy that backend.
 
@@ -127,7 +127,7 @@ For production-scale AI marketing video creation:
 
 用于爆款短视频分析与复刻的 AI Agent 系统。
 
-当前版本：**v5.13-server-core**。支持分段 4×4 真实帧故事板、产品与达人替换，通过灵智服务端完成 Gemini 动态拆解和 GPT 提示词重构，经本地校验与用户确认后生成视频。
+当前版本：**v5.13**。支持分段 4×4 真实帧故事板、产品与达人替换，通过灵智服务端完成 Gemini 动态拆解和 GPT 提示词重构，经本地校验与用户确认后生成视频。
 
 查看[安装与使用说明](skills/recreate-video-agent/README.md)和[完整技能规则](skills/recreate-video-agent/SKILL.md)。使用时需要灵智 API Key 和兼容的 `recreate-video-prompt` 服务端工作流；安装技能不会自动部署服务端。
 

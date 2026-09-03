@@ -130,8 +130,8 @@ class StoryboardDrivenWorkflowTest(unittest.TestCase):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         metadata = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
         self.assertIn("name: recreate-video-agent\n", skill)
-        self.assertIn("# recreate-video-agent v5.13-server-core", skill)
-        self.assertIn('display_name: "recreate-video-agent v5.13-server-core"', metadata)
+        self.assertIn("# recreate-video-agent v5.13", skill)
+        self.assertIn('display_name: "recreate-video-agent v5.13"', metadata)
         self.assertIn("$recreate-video-agent ", metadata)
         self.assertNotIn("$recreate-product-video-v4", metadata)
 

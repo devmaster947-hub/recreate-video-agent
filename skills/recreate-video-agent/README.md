@@ -1,6 +1,6 @@
 # recreate-video-agent
 
-版本：**v5.13-server-core**
+版本：**v5.13**
 
 用于在 Codex 中复刻 TikTok、抖音等产品视频的技能。客户端从原视频提取分段真实帧故事板，按需替换产品和达人，由灵智服务端完成 Gemini 动态拆解与 GPT 多模态提示词重构，再由客户端校验、展示提示词并在用户确认后生成视频。
 
@@ -16,7 +16,9 @@
 
 ## 安装到 Codex
 
-克隆仓库，或通过 GitHub 下载仓库 ZIP 并解压：
+优先下载 [v5.13 技能安装包](https://github.com/devmaster947-hub/recreate-video-agent/releases/download/v5.13/recreate-video-agent-v5.13.zip)，解压后将 `recreate-video-agent` 文件夹复制到下方技能目录。
+
+也可以克隆仓库，或通过 GitHub 下载仓库 ZIP 并解压：
 
 ```sh
 git clone https://github.com/devmaster947-hub/recreate-video-agent.git
@@ -64,4 +66,4 @@ $recreate-video-agent 帮我复刻这个产品视频
 | `cli/` | macOS ARM64 与 Windows x64 的 LZStudio CLI |
 | `tests/` | 随技能提供的测试用例 |
 
-本版本基于 v5.13-server-core 安装包，将技能名称与调用名统一为 `recreate-video-agent`，并兼容旧名称保存的技能优化方案。
+技能名称与调用名统一为 `recreate-video-agent`，版本号为 `v5.13`，并兼容旧名称保存的技能优化方案。
