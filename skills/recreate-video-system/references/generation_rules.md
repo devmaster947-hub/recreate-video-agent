@@ -1,201 +1,41 @@
-# 图片与视频生成规则
+# Step 5：生成、候选和恢复规则
 
-## 1. 通用规则
+## Provider与模型
 
-- 图片、视频任务默认并发执行。
-- Prompt 默认锁定并使用服务原文。只有用户明确要求修改 Prompt 时，才使用 manifest 中的显式覆盖；不得由代理主动改写。
-- 覆盖按 `creator-images`、`storyboards`、`videos` 分开记录，只作用于用户指定的 ID 和目标；不得自动跨目标传播。
-- 服务原始 Prompt 始终保留。已取得 submit ID 的生成任务禁止中途修改 Prompt。
-- 所有达人图和分镜图固定使用 GPT Image 2（`gpt-image-2`）。图片模型不可配置，不展示选择，不接受用户、代理、输入文件、旧 manifest 或调用参数修改，也不允许降级或切换。
-- 同阶段所有依赖满足的任务批量 submit，并发 poll。
-- 不允许任务串行等待。
-- 最终展示顺序：
-  - Creator 按 creatorId
-  - 图片/视频按 segmentId
+运行`run_cli.py cli ensure-installed`和`run_cli.py video-provider detect`。模型能力以 [model_capabilities.md](model_capabilities.md) 及`scripts/model_capabilities.py`为准。新任务默认`seedance-2-fast`、720p、原片比例。
 
-生成成功标准：
+Seedance系列自动路由顺序为官方Dreamina CLI → 小云雀CLI → 灵智工坊。官方Dreamina和小云雀必须使用逻辑模型对应的精确VIP provider ID；CLI未声明该ID时该provider不可用，禁止静默改用同系列非VIP。小云雀当前只有provider骨架，自动路由必须跳过；显式选择时在任何上传或submit前报告“适配器尚未配置”。任务取得ID后provider锁定，网络错误和超时只能继续轮询该ID。
 
-- 服务返回成功状态
-- 本地下载文件非空
+## 参考素材
 
-默认保持：
+每段顺序固定为：一张`storyboards.generation`最终Storyboard → 本段需要时的产品身份板/产品图 → 本段`creatorIds`显式指定的达人图。Prompt负责运动、声音和连续时间轴。禁止把原视频或含旧产品的原始Storyboard作为生成参考。
 
-- 原 Segment Prompt。
-- 用户明确要求修改分镜图 Prompt 时，只对最终派生的分镜 Prompt 应用覆盖。
+每个Segment的`storyboardIds`必须且只能含一个ID；该Storyboard的`segmentId/globalStart/globalEnd/localStart/localEnd`必须与Prompt完全一致。`creatorIds: []`严格表示不传达人图，缺失或空列表不得回退为全部达人。
 
-禁止：
+`creatorIds`只包含该Segment中完成替换的目标`creator-N`。保留原样的`source-creator-N`记录在Storyboard metadata的`keptSourceCreatorIds`中，不上传外部达人图。单张达人图不得因为一个Segment内有多人而重复传递或用于多个身份。
 
-- 根据视觉效果判断成功失败
-- 播放、抽帧、解码检查视频
-- 自动替换成功结果
+新产品模式至少一张`product.productImages`。只有该Segment的Storyboard metadata显示存在目标产品时才附加产品身份图；沿用对标产品或无产品Segment均不传外部产品图。多张产品图在图片上限不足时确定性合成一张身份板，不得静默丢图。
 
+官方Seedance最多9张图片。仍超限时明确失败，不得随意拆分已经锁定的Segment。灵智工坊首次上传本地素材前列出文件名和目的地，并取得聊天同意及系统授权；官方CLI可直接读取本地文件。小云雀适配器启用前不得上传任何素材。
 
----
+提交前运行`scripts/reference_audit.py`，确认Storyboard存在、属于本段且已完成Step 2复核；新产品模式不得引用`storyboards.original`；产品与达人引用必须与每段metadata一致。
 
-# 2. 引用素材
+## 候选与费用边界
 
-允许引用（存在时）：
+首次付费提交前，用户必须已经看到当前最新版所有Segment的完整视频Prompt，并明确回复“确认生成”。启动确认“确认开始”不能替代本确认。未确认时必须停止在Step 4；不得上传灵智素材或提交任何视频任务。
 
-- 用户产品图
-- 用户达人参考图
-- 当前任务生成达人图
-- 当前 Segment 分镜图
+首次提交命令必须显式传入`--generation-approved`。脚本仅在需要创建新任务ID时检查该标志；已有任务ID的查询、下载和恢复不得要求重复确认，也不得借机重新submit。任何Prompt、Storyboard、产品/达人素材、模型、时长、语言或输出规格变更后，旧确认失效，必须重新展示Prompt并重新取得确认。
 
+用户明确要求只生成部分Segment时，使用一个或多个`--segment-id <id>`选择提交范围，并同时传入`--skip-concat`。脚本仍先校验完整Segment计划，只对指定段执行引用审计、付费提交和下载；未选择的Segment不得产生任务ID或费用。后续补齐全部Segment后再拼接与整片质检。
 
-禁止：
+第一次生成使用`candidate-01`，每个Segment在manifest保存attempts。任务ID、模型、分辨率、Prompt、输出、积分和错误全部保留；新候选不覆盖旧结果。
 
-- 原视频作为生成参考
-- 抽帧
-- 提取音频
+成功但质量未通过时不得自动重提。只有用户明确同意后才能传入`--new-candidate --quality-retry-approved`。服务终态失败也必须报告原任务和实际积分，不得把重复submit伪装成恢复。
 
+## 生成后质检
 
-每个 Segment 只引用自己已有的：
+完成拼接后自动运行本地技术质检并创建对齐图与draft质量报告。Codex按 [quality_gates.md](quality_gates.md) 完成语义评分；最终报告写入`finalVideo.qualityReport`。未评分或未通过时保持`step5_review_pending`，不会自动生成下一候选。
 
-- 产品图
-- 达人图
-- 分镜图
+## Manifest
 
-产品图可以为空；无其他引用图时允许按 Segment Prompt 进行纯文本生成。
-
-模型引用必须使用公网 URL。
-
-若此时新增本地素材，先按 SKILL.md 单独取得上传同意和系统安全授权，刷新公网 URL，然后自动提交对应的已确认生成任务；不得把新增素材静默排除。
-
-
----
-
-# 3. 达人图
-
-creatorReferencePlan 存在且用户选择生成时：
-
-流程：
-
-creatorPrompt
-→ 批量生成
-→ 并发查询
-→ 下载
-
-
-要求：
-
-- 每个 Creator 独立生成。
-- 比例 9:16。
-- 保持人物：
-  - 身份
-  - 外貌
-  - 发型
-  - 服装
-
-
-禁止新增：
-
-- 未描述人物特征
-- 未描述产品
-- 未描述场景
-
-
-失败：
-
-只有服务明确终态失败才允许重试。Creator 出现在至少 2 个 Segment 时，最大尝试次数为 2；只有 `TaskFailedError` 才消耗一次尝试，处理中、网络错误和本地超时继续查询原任务，不得重新 submit。
-
-其他状态继续查询原任务。
-
-两次终态失败后必须向用户说明受影响 Segment，并提供“上传达人参考图后恢复”或“缺少该达人图时继续”的明确选择；不得替用户默认选择后者。
-
-下载成功后使用 `![Creator <creatorId> 达人图](<绝对本地路径>)` 展示。展示只供用户查看，不调用 `view_image` 或其他图片分析能力。
-
-
----
-
-# 4. 分镜图
-
-每个 Segment 独立生成分镜图。
-
-
-规则：
-
-- 每个画格包含一个清晰时间状态。
-- 保持镜头顺序。
-- 镜头不足时，从现有镜头的开始、过程、后期、操作特写、结束或结果状态中提取不同时间状态补满。
-- 不得留空，不新增剧情、人物、产品、功能、场景或结果。
-
-
-布局：
-
-1镜：
-1×1，1个完整关键帧
-
-2-4镜：
-2×2，4个完整关键帧
-
-5镜及以上：
-3×3，9个完整关键帧
-
-超过9镜仍为单张3×3，从完整时间轴中确定性选择9个代表镜头，不报错、不分张。
-
-
-保持：
-
-- 人物一致
-- 产品一致
-- 动作连续
-- 场景连续
-
-
-禁止：
-
-- 字幕
-- 水印
-- 文字标签
-
-下载成功后使用 `![Segment <segmentId> 分镜图](<绝对本地路径>)` 展示。展示只供用户查看，不调用 `view_image` 或其他图片分析能力。
-
-
----
-
-# 5. 视频生成
-
-每个 Segment：
-
-输入：
-
-- model
-- prompt
-- duration
-- referenceImages
-
-
-规则：
-
-- 所有素材准备完成的 Segment 并发生成。
-- 默认生成全部 Segment；用户明确指定部分 Segment 时，只提交这些 Segment。
-- 默认自动选择视频渠道；用户明确指定 `official_cli` 或 `lingzhi_cli` 时，提交前锁定该渠道，取得任务 ID 后不得切换。
-- Prompt 默认锁定；只在用户明确要求修改对应视频 Segment 时应用 `videos` 覆盖。
-- 不拆分 Segment。
-
-
-成功：
-
-服务成功 + 文件存在。
-
-
-全部完成：
-
-按 segmentId 顺序拼接。
-
-
----
-
-# 6. 结果输出
-
-返回：
-
-- creatorImages
-- storyboards
-- videos
-- videoPrompts
-- creatorReferencePlan
-- credits
-
-
-不得过滤、替换已成功生成结果。
+保持`version=4`，新任务使用`schemaRevision=5.4`。读取旧schema 5.0～5.3时，将非空`shotContracts`和`renderUnits`移入`migrationArchive`后从活动接口移除，并补充`creatorReplacementMap`；根据现有Storyboard恢复到最近可继续步骤。新任务和新写入不得出现`shotContracts`、`renderUnits`或任何`renderUnitId(s)`字段。

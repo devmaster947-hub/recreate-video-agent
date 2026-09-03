@@ -9,15 +9,23 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import generation_manifest
+try:
+    from scripts import generation_manifest
+except ModuleNotFoundError:
+    import generation_manifest  # type: ignore[no-redef]
 
 
 def ordered_segments(manifest: dict) -> list[tuple[int, Path]]:
-    segments = manifest.get("segments", {})
-    if not segments:
+    raw_segments = manifest.get("videos", manifest.get("segments", {}))
+    if not raw_segments:
         raise ValueError("Manifest has no video segments")
     ordered: list[tuple[int, Path]] = []
-    for raw_id, entry in segments.items():
+    entries = (
+        [(entry.get("segmentId"), entry) for entry in raw_segments]
+        if isinstance(raw_segments, list)
+        else list(raw_segments.items())
+    )
+    for raw_id, entry in entries:
         try:
             segment_id = int(raw_id)
         except (TypeError, ValueError) as exc:

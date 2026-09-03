@@ -1,4 +1,4 @@
 interface:
-  display_name: "爆款视频复刻"
-  short_description: "支持官方 Seedance 与灵智 CLI 的爆款视频复刻"
-  default_prompt: "使用 $recreate-video-system 拆解并复刻这支对标视频。"
+  display_name: "recreate-video-system v5.13-server-core"
+  short_description: "分段真实帧与服务端核心工作流驱动的视频复刻"
+  default_prompt: "Use $recreate-video-system to recreate this product video with locked segmented storyboards, server-side prompt generation, and quality review."

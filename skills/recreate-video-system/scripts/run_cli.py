@@ -24,6 +24,11 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+try:
+    from scripts.model_capabilities import MODEL_CAPABILITIES, normalize_model, validate_generation
+except ModuleNotFoundError:
+    from model_capabilities import MODEL_CAPABILITIES, normalize_model, validate_generation
+
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = Path.home() / ".recreate-video" / "config.json"
@@ -37,17 +42,31 @@ PENDING_STATES = {
 }
 SUCCESS_STATES = {"succeeded", "success", "completed", "complete"}
 FAILED_STATES = {"failed", "failure", "fail", "error", "cancelled", "canceled"}
-VIDEO_PROVIDERS = {"auto", "official_cli", "lingzhi_cli"}
+VIDEO_PROVIDERS = {"auto", "official_cli", "xiaoyunque_cli", "lingzhi_cli"}
 VIDEO_MODEL_IDS = {
-    "google omni": "google-omni",
     "grok imagine 1.5 preview": "grok-imagine-1-5-preview",
+    "grok imagine 1 5 preview": "grok-imagine-1-5-preview",
+    "minimax h3": "minimax-h3",
+    "seedance 2": "seedance-2",
+    "seedance 2.5": "seedance-2-5",
+    "seedance 2 5": "seedance-2-5",
     "seedance 2 fast": "seedance-2-fast",
+    "seedance 2 fast vip": "seedance-2-fast-vip",
     "seedance 2 mini": "seedance-2-mini",
+    "seedance 2 vip": "seedance-2-vip",
 }
 OFFICIAL_VIDEO_MODEL_IDS = {
-    "seedance-2-mini": "seedance2.0mini",
-    "seedance-2-fast": "seedance2.0fast",
-    "seedance-2": "seedance2.0",
+    key: str(value["officialId"])
+    for key, value in MODEL_CAPABILITIES.items()
+    if value.get("officialId")
+}
+XIAOYUNQUE_VIDEO_MODEL_IDS = {
+    key: str(value["xiaoyunqueId"])
+    for key, value in MODEL_CAPABILITIES.items()
+    if value.get("xiaoyunqueId")
+}
+OFFICIAL_VIDEO_PROVISIONAL_MODEL_IDS = {
+    key for key, value in MODEL_CAPABILITIES.items() if value.get("provisionalOfficial")
 }
 RECREATE_USER_CONFIG_OMIT = {
     "videoStyle",
@@ -284,25 +303,29 @@ def resolve_cli(
     system: str | None = None,
     machine: str | None = None,
     skill_root: str | os.PathLike[str] | None = None,
+    install_dir: str | os.PathLike[str] | None = None,
+    home: str | os.PathLike[str] | None = None,
+    persist_path: bool = True,
+    verify: bool = True,
 ) -> Path:
-    """Select only the bundled executable for macOS arm64 or Windows x64."""
-    system_name = system or platform.system()
-    architecture = (machine or platform.machine()).lower()
-    root = Path(skill_root).resolve() if skill_root else SKILL_ROOT
-    if system_name == "Darwin" and architecture in {"arm64", "aarch64"}:
-        candidate = root / "cli" / "macos-arm64" / "lzstudio"
-    elif system_name == "Windows" and architecture in {"amd64", "x86_64", "x64"}:
-        candidate = root / "cli" / "windows-x64" / "lzstudio.exe"
-    else:
-        raise LzStudioError("当前平台不支持，请使用 macOS Apple Silicon 或 Windows x64。")
-    if not candidate.is_file() or candidate.stat().st_size <= 0:
-        raise LzStudioError(f"内置 LZStudio CLI 缺失：{candidate}")
-    if system_name == "Darwin" and not os.access(candidate, os.X_OK):
+    """Install into the user's application directory, configure PATH, and return it."""
+    try:
         try:
-            candidate.chmod(candidate.stat().st_mode | stat.S_IXUSR)
-        except OSError as exc:
-            raise LzStudioError(f"无法设置内置 CLI 的执行权限：{exc}") from None
-    return candidate
+            from scripts.install_lzstudio import ensure_installed
+        except ModuleNotFoundError:
+            from install_lzstudio import ensure_installed  # type: ignore[no-redef]
+        result = ensure_installed(
+            system=system,
+            machine=machine,
+            skill_root=skill_root,
+            install_dir=install_dir,
+            home=home,
+            persist_path=persist_path,
+            verify=verify,
+        )
+    except (OSError, RuntimeError) as exc:
+        raise LzStudioError(str(exc)) from None
+    return Path(str(result["installedPath"])).resolve()
 
 
 def resolve_official_cli(
@@ -346,6 +369,10 @@ def detect_video_providers(
     system: str | None = None,
     machine: str | None = None,
     skill_root: str | os.PathLike[str] | None = None,
+    install_dir: str | os.PathLike[str] | None = None,
+    home: str | os.PathLike[str] | None = None,
+    persist_path: bool = True,
+    verify: bool = True,
 ) -> dict[str, bool]:
     """Detect installed video channels without login, network, or credit usage."""
     try:
@@ -354,12 +381,21 @@ def detect_video_providers(
     except LzStudioError:
         official_available = False
     try:
-        resolve_cli(system=system, machine=machine, skill_root=skill_root)
+        resolve_cli(
+            system=system,
+            machine=machine,
+            skill_root=skill_root,
+            install_dir=install_dir,
+            home=home,
+            persist_path=persist_path,
+            verify=verify,
+        )
         lingzhi_available = True
     except LzStudioError:
         lingzhi_available = False
     return {
         "official_cli": official_available,
+        "xiaoyunque_cli": False,
         "lingzhi_cli": lingzhi_available,
     }
 
@@ -373,18 +409,64 @@ def resolve_video_provider(
     provider = str(video_provider).strip().lower()
     if provider not in VIDEO_PROVIDERS:
         raise LzStudioError(
-            "videoProvider 必须是 auto、official_cli 或 lingzhi_cli。"
+            "videoProvider 必须是 auto、official_cli、xiaoyunque_cli 或 lingzhi_cli。"
         )
     channels = dict(availability or detect_video_providers())
+    channels["xiaoyunque_cli"] = False
+    if provider == "xiaoyunque_cli":
+        raise LzStudioError("小云雀 CLI 适配器尚未配置，当前禁止提交。")
     if provider != "auto":
         if not channels.get(provider, False):
             raise LzStudioError(f"视频生成渠道不可用：{provider}")
         return provider
     if channels.get("official_cli", False):
         return "official_cli"
+    if channels.get("xiaoyunque_cli", False):
+        return "xiaoyunque_cli"
     if channels.get("lingzhi_cli", False):
         return "lingzhi_cli"
     raise LzStudioError("未检测到可用的视频生成渠道。")
+
+
+def official_cli_supports_video_model(
+    model: str,
+    *,
+    cli_path: str | os.PathLike[str] | None = None,
+) -> bool:
+    """Check the exact provider model ID locally without submitting a task."""
+    model_id = _video_model_id(str(model))
+    official_id = OFFICIAL_VIDEO_MODEL_IDS.get(model_id)
+    if official_id is None:
+        return False
+    try:
+        executable = resolve_official_cli(cli_path=cli_path)
+        completed = subprocess.run(
+            [str(executable), "multimodal2video", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (LzStudioError, OSError, subprocess.SubprocessError):
+        return False
+    help_text = f"{completed.stdout}\n{completed.stderr}"
+    return completed.returncode == 0 and official_id in help_text
+
+
+def video_provider_availability(
+    model: str,
+    *,
+    availability: Mapping[str, bool] | None = None,
+) -> dict[str, bool]:
+    """Return provider availability filtered by the selected model."""
+    channels = dict(availability or detect_video_providers())
+    model_id = _video_model_id(str(model))
+    channels["xiaoyunque_cli"] = False
+    if model_id not in OFFICIAL_VIDEO_MODEL_IDS:
+        channels["official_cli"] = False
+    elif channels.get("official_cli", False) and not official_cli_supports_video_model(model):
+        channels["official_cli"] = False
+    return channels
 
 
 def _redact(value: str, secret: str) -> str:
@@ -409,7 +491,7 @@ def _parse_json(raw: str) -> Any:
 def _video_model_id(model: str) -> str:
     value = str(model).strip()
     normalized = " ".join(value.lower().replace("_", " ").replace("-", " ").split())
-    return VIDEO_MODEL_IDS.get(normalized, value)
+    return VIDEO_MODEL_IDS.get(normalized, normalize_model(value))
 
 
 def run_cli(
@@ -435,16 +517,16 @@ def run_cli(
             raise LzStudioError(
                 f"图片生成模型固定为 {IMAGE_MODEL_ID}，不接受修改。"
             )
+    executable = Path(cli_path).expanduser().resolve() if cli_path else resolve_cli()
+    if not executable.is_file():
+        raise LzStudioError(f"已安装的 LZStudio CLI 缺失：{executable}")
     key = load_api_key(api_key=api_key, config_path=config_path)
     if not key:
         raise LzStudioError("灵智工坊 API Key 不能为空。")
-    executable = Path(cli_path).expanduser().resolve() if cli_path else resolve_cli()
-    if not executable.is_file():
-        raise LzStudioError(f"内置 LZStudio CLI 缺失：{executable}")
     prefix_length = (
         2
         if len(normalized_arguments) >= 2
-        and normalized_arguments[0] in {"image", "video", "recreate-video-prompt"}
+        and normalized_arguments[0] in {"image", "video"}
         else 1
     )
     command = [
@@ -591,7 +673,7 @@ def _resolve_cached_upload(
     at: datetime | None = None,
 ) -> dict[str, Any]:
     """Reuse one valid global upload or upload it once while holding the cache lock."""
-    if kind not in {"benchmark", "product", "creator"}:
+    if kind not in {"benchmark", "storyboard", "product", "creator"}:
         raise LzStudioError(f"不支持的素材缓存类型：{kind}")
     path = Path(file_path).expanduser().resolve()
     if not path.is_file() or path.stat().st_size <= 0:
@@ -921,67 +1003,6 @@ def download_media(
     return destination
 
 
-def submit_recreate_video_prompt(
-    benchmark_video_url: str,
-    user_config: Mapping[str, Any],
-    product_brief: Mapping[str, Any],
-    creator_brief: Mapping[str, Any] | None,
-    **kwargs: Any,
-) -> str:
-    if not _http_url(benchmark_video_url):
-        raise LzStudioError("benchmarkVideoUrl 必须是公网 HTTP(S) URL。")
-    if not isinstance(user_config, Mapping):
-        raise LzStudioError("userConfig 必须是 JSON 对象。")
-    sanitized_user_config = {
-        key: value
-        for key, value in user_config.items()
-        if key not in RECREATE_USER_CONFIG_OMIT
-    }
-    duration = sanitized_user_config.get("duration")
-    if duration is not None and (
-        isinstance(duration, bool)
-        or not isinstance(duration, (int, float))
-        or duration < 0
-    ):
-        raise LzStudioError("userConfig.duration 必须是大于等于 0 的数字；0 表示与原视频一致。")
-    if not isinstance(product_brief, Mapping) or not product_brief:
-        raise LzStudioError("productBrief 必须是非空 JSON 对象。")
-    if creator_brief is not None and not isinstance(creator_brief, Mapping):
-        raise LzStudioError("creatorBrief 必须是 JSON 对象或 null。")
-    arguments = [
-        "recreate-video-prompt",
-        "submit",
-        "--benchmark-video-url",
-        benchmark_video_url,
-        "--user-config",
-        json.dumps(sanitized_user_config, ensure_ascii=False, separators=(",", ":")),
-    ]
-    arguments.extend(
-        [
-            "--product-brief",
-            json.dumps(dict(product_brief), ensure_ascii=False, separators=(",", ":")),
-        ]
-    )
-    if creator_brief is not None:
-        arguments.extend(
-            [
-                "--creator-brief",
-                json.dumps(dict(creator_brief), ensure_ascii=False, separators=(",", ":")),
-            ]
-        )
-    return _task_id(run_cli(arguments, timeout=600, **kwargs))
-
-
-def fetch_recreate_video_prompt(task_id: str, **kwargs: Any) -> Any:
-    if not str(task_id).strip():
-        raise LzStudioError("任务 id 不能为空。")
-    return run_cli(
-        ["recreate-video-prompt", "fetch", "--id", str(task_id).strip()],
-        timeout=300,
-        **kwargs,
-    )
-
-
 def _state(value: Any) -> str:
     queue = [value]
     while queue:
@@ -1044,69 +1065,6 @@ def poll_task(
         if remaining <= 0:
             raise LzStudioError(f"任务 {task_id} 轮询超时。")
         sleep(min(interval, remaining))
-
-
-def _validated_recreate_output(value: Any) -> dict[str, Any]:
-    source = _output(value)
-    if not isinstance(source, dict):
-        raise LzStudioError("复刻提示词结果必须是 JSON 对象。")
-    prompts = source.get("videoPrompts")
-    creator_key = (
-        "creatorPrompts"
-        if isinstance(source.get("creatorPrompts"), dict)
-        else "creatorReferencePlan"
-    )
-    plan = source.get(creator_key)
-    if not isinstance(prompts, dict) or not isinstance(prompts.get("segments"), list) or not prompts["segments"]:
-        raise LzStudioError("结果缺少非空 videoPrompts.segments。")
-    if not isinstance(plan, dict) or not isinstance(plan.get("creators"), list):
-        raise LzStudioError("结果缺少 creatorPrompts.creators。")
-    segment_ids: set[str] = set()
-    for segment in prompts["segments"]:
-        if not isinstance(segment, dict):
-            raise LzStudioError("videoPrompts.segments 的每一项必须是对象。")
-        missing = [
-            key for key in ("segmentId", "title", "duration", "prompt")
-            if key not in segment
-        ]
-        identifier = str(segment.get("segmentId", "")).strip()
-        if missing or not identifier or identifier in segment_ids:
-            raise LzStudioError("Segment 字段不完整，或 segmentId 为空/重复。")
-        if not isinstance(segment.get("prompt"), str) or not segment["prompt"].strip():
-            raise LzStudioError("每个 Segment 的 prompt 必须为非空字符串。")
-        if "referenceImages" in segment and not isinstance(segment.get("referenceImages"), list):
-            raise LzStudioError("每个 Segment 的 referenceImages 必须是数组。")
-        segment_ids.add(identifier)
-    creator_ids: set[str] = set()
-    for creator in plan["creators"]:
-        if not isinstance(creator, dict):
-            raise LzStudioError("creatorReferencePlan.creators 的每一项必须是对象。")
-        missing = [key for key in ("creatorId", "prompt") if key not in creator]
-        identifier = str(creator.get("creatorId", "")).strip()
-        if missing or not identifier or identifier in creator_ids:
-            raise LzStudioError("Creator 字段不完整，或 creatorId 为空/重复。")
-        if not isinstance(creator.get("prompt"), str) or not creator["prompt"].strip():
-            raise LzStudioError("每个 Creator 的 prompt 必须为非空字符串。")
-        if "referenceImages" in creator and not isinstance(creator.get("referenceImages"), list):
-            raise LzStudioError("每个 Creator 的 referenceImages 必须是数组。")
-        creator_ids.add(identifier)
-    return {"videoPrompts": prompts, creator_key: plan}
-
-
-def poll_recreate_video_prompt(task_id: str, **kwargs: Any) -> dict[str, Any]:
-    fetch_kwargs = {
-        key: kwargs.pop(key)
-        for key in list(kwargs)
-        if key not in {"interval", "poll_timeout", "sleep"}
-    }
-    value = poll_task(
-        lambda identifier: fetch_recreate_video_prompt(identifier, **fetch_kwargs),
-        task_id,
-        interval=kwargs.pop("interval", 20.0),
-        timeout=kwargs.pop("poll_timeout", 1800.0),
-        sleep=kwargs.pop("sleep", time.sleep),
-    )
-    return _validated_recreate_output(value)
 
 
 def submit_image(
@@ -1213,6 +1171,10 @@ def submit_video(
     model_id = _video_model_id(str(model))
     if not model_id:
         raise LzStudioError("视频 model 不能为空。")
+    try:
+        validate_generation(model_id, duration, resolution)
+    except ValueError as exc:
+        raise LzStudioError(str(exc)) from None
     arguments = [
         "video", "submit", "--model", model_id, "--prompt", prompt.strip(),
         "--aspect-ratio", aspect_ratio, "--resolution", resolution,
@@ -1243,9 +1205,17 @@ def _official_video_model_id(model: str) -> str:
     official_id = OFFICIAL_VIDEO_MODEL_IDS.get(model_id)
     if official_id is None:
         raise LzStudioError(
-            f"官方 Seedance CLI 不支持视频模型：{model_id}；Google Omni 请使用灵智工坊 CLI。"
+            f"官方 Seedance CLI 不支持视频模型：{model_id}；该模型请使用灵智工坊 CLI。"
         )
     return official_id
+
+
+def _xiaoyunque_video_model_id(model: str) -> str:
+    model_id = _video_model_id(model)
+    provider_id = XIAOYUNQUE_VIDEO_MODEL_IDS.get(model_id)
+    if provider_id is None:
+        raise LzStudioError(f"小云雀 CLI 不支持视频模型：{model_id}。")
+    return provider_id
 
 
 def submit_official_video(
@@ -1261,13 +1231,13 @@ def submit_official_video(
     """Submit one Seedance 2 task through the official Dreamina CLI."""
     if not isinstance(prompt, str) or not prompt.strip():
         raise LzStudioError("视频 Prompt 不能为空。")
+    normalized_model = _video_model_id(str(model))
     try:
-        duration_value = int(float(str(duration)))
-    except (TypeError, ValueError):
-        raise LzStudioError("官方 Seedance 视频时长必须是 4-15 秒的整数。") from None
-    if duration_value < 4 or duration_value > 15:
-        raise LzStudioError("官方 Seedance 视频时长必须是 4-15 秒。")
-    model_id = _official_video_model_id(str(model))
+        checked = validate_generation(normalized_model, duration, resolution)
+    except (TypeError, ValueError) as exc:
+        raise LzStudioError(str(exc)) from None
+    duration_value = int(checked["duration"])
+    model_id = _official_video_model_id(normalized_model)
     files: list[Path] = []
     for value in reference_files or []:
         path = Path(value).expanduser().resolve()
@@ -1275,8 +1245,9 @@ def submit_official_video(
             raise LzStudioError(f"官方 Seedance 参考图不存在或为空：{path}")
         if path not in files:
             files.append(path)
-    if len(files) > 9:
-        raise LzStudioError("官方 Seedance multimodal2video 最多支持 9 张参考图。")
+    maximum_images = int(checked.get("maxImages", 9))
+    if len(files) > maximum_images:
+        raise LzStudioError(f"官方 Seedance multimodal2video 最多支持 {maximum_images} 张参考图。")
     command = "multimodal2video" if files else "text2video"
     arguments = [
         command,
@@ -1321,10 +1292,10 @@ def generate_video(
 ) -> dict[str, Any]:
     """Generate through either provider and return one stable public shape."""
     try:
-        channels = dict(availability or detect_video_providers())
-        if _video_model_id(str(model)) not in OFFICIAL_VIDEO_MODEL_IDS:
-            channels["official_cli"] = False
+        channels = video_provider_availability(model, availability=availability)
         provider = resolve_video_provider(video_provider, availability=channels)
+        if provider == "xiaoyunque_cli":
+            raise LzStudioError("小云雀 CLI 适配器尚未配置，当前禁止提交。")
         if provider == "official_cli":
             official_options = dict(official_kwargs or {})
             task_id = submit_official_video(
@@ -1411,455 +1382,6 @@ def build_final_output(
     }
 
 
-def _load_workflow_input(input_path: str | os.PathLike[str]) -> dict[str, Any]:
-    path = Path(input_path).expanduser().resolve()
-    if not path.is_file() or path.stat().st_size <= 0:
-        raise LzStudioError(f"复刻输入文件不存在或为空：{path}")
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise LzStudioError(f"无法读取复刻输入：{exc}") from None
-    if not isinstance(value, dict):
-        raise LzStudioError("复刻输入必须是 JSON 对象。")
-    for key in ("benchmarkVideo", "productBrief", "productAnalysis", "userConfig", "creatorBrief"):
-        if not isinstance(value.get(key), dict):
-            raise LzStudioError(f"复刻输入缺少对象字段：{key}")
-    images = value["productBrief"].get("productImages")
-    if not isinstance(images, list):
-        raise LzStudioError("productBrief.productImages 必须是数组。")
-    if not images:
-        value["productBrief"]["productName"] = BENCHMARK_PRODUCT_NAME
-    duration = value["userConfig"].get("duration")
-    if (
-        isinstance(duration, bool)
-        or not isinstance(duration, (int, float))
-        or duration < 0
-    ):
-        raise LzStudioError("userConfig.duration 必须是大于等于 0 的数字；0 表示与原视频一致。")
-    if not isinstance(value["userConfig"].get("otherRequirements", ""), str):
-        raise LzStudioError("userConfig.otherRequirements 必须是字符串。")
-    value["userConfig"] = {
-        key: item
-        for key, item in value["userConfig"].items()
-        if key not in RECREATE_USER_CONFIG_OMIT
-    }
-    return value
-
-
-def _build_workflow_product(analysis: Mapping[str, Any]) -> dict[str, Any]:
-    try:
-        from core.product_builder import build_product_brief, serialize_product_brief
-    except ModuleNotFoundError:
-        if str(SKILL_ROOT) not in sys.path:
-            sys.path.insert(0, str(SKILL_ROOT))
-        from core.product_builder import build_product_brief, serialize_product_brief
-
-    list_fields = (
-        "userSellingPoints",
-        "productMaterialFacts",
-        "aiSupplements",
-        "forbiddenChanges",
-    )
-    for field in list_fields:
-        if not isinstance(analysis.get(field, []), list):
-            raise LzStudioError(f"productAnalysis.{field} 必须是数组。")
-    try:
-        brief = build_product_brief(
-            user_selling_points=analysis.get("userSellingPoints", []),
-            product_material_facts=analysis.get("productMaterialFacts", []),
-            ai_supplements=analysis.get("aiSupplements", []),
-            product_name=str(analysis.get("productName", "")),
-            appearance=str(analysis.get("appearance", "")),
-            product_color=str(analysis.get("productColor", "")),
-            material=str(analysis.get("material", "")),
-            logo=str(analysis.get("logo", "")),
-            structure=str(analysis.get("structure", "")),
-            usage=str(analysis.get("usage", "")),
-            forbidden_changes=analysis.get("forbiddenChanges", []),
-        )
-        return json.loads(serialize_product_brief(brief, pretty=False))
-    except ValueError as exc:
-        raise LzStudioError(str(exc)) from None
-
-
-def _asset_file(asset: Mapping[str, Any], role: str) -> Path:
-    value = asset.get("filePath")
-    if not isinstance(value, str) or not value.strip():
-        raise LzStudioError(f"{role}缺少本地 filePath。")
-    path = Path(value).expanduser().resolve()
-    if not path.is_file() or path.stat().st_size <= 0:
-        raise LzStudioError(f"{role}不存在或为空：{path}")
-    return path
-
-
-def _existing_asset_media(asset: Mapping[str, Any]) -> dict[str, Any] | None:
-    candidate = {
-        "url": asset.get("url", ""),
-        "mimeType": asset.get("mimeType", ""),
-        "expiredAt": asset.get("expiredAt", ""),
-    }
-    return candidate if _public_media_usable(candidate) else None
-
-
-def _prepare_workflow_media(
-    value: Mapping[str, Any],
-    *,
-    config_path: str | os.PathLike[str] | None = None,
-    uploader: Callable[..., dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    benchmark = value["benchmarkVideo"]
-    benchmark_path: Path | None = None
-    if isinstance(benchmark.get("filePath"), str) and benchmark["filePath"].strip():
-        benchmark_path = _asset_file(benchmark, "对标视频")
-    benchmark_media = _existing_asset_media(benchmark)
-    if benchmark_media is None:
-        if benchmark_path is None:
-            raise LzStudioError("对标视频缺少可用 URL 或本地 filePath。")
-        benchmark_media = _resolve_cached_upload(
-            benchmark_path,
-            kind="benchmark",
-            benchmark=True,
-            config_path=config_path,
-            uploader=uploader,
-        )
-
-    product_assets: list[dict[str, Any]] = []
-    for index, asset in enumerate(value["productBrief"]["productImages"], start=1):
-        if not isinstance(asset, dict):
-            raise LzStudioError(f"产品图 {index} 必须是对象。")
-        path = _asset_file(asset, f"产品图 {index}")
-        media = _existing_asset_media(asset)
-        if media is None:
-            media = _resolve_cached_upload(
-                path,
-                kind="product",
-                config_path=config_path,
-                uploader=uploader,
-            )
-        product_assets.append({"path": path, "media": media})
-
-    creator_brief = dict(value["creatorBrief"])
-    creator_inputs = creator_brief.get("creatorImages", [])
-    if not isinstance(creator_inputs, list):
-        raise LzStudioError("creatorBrief.creatorImages 必须是数组。")
-    creator_assets: list[dict[str, Any]] = []
-    public_creators: list[dict[str, Any]] = []
-    for index, asset in enumerate(creator_inputs, start=1):
-        if not isinstance(asset, dict):
-            raise LzStudioError(f"达人图 {index} 必须是对象。")
-        media = _existing_asset_media(asset)
-        path: Path | None = None
-        if isinstance(asset.get("filePath"), str) and asset["filePath"].strip():
-            path = _asset_file(asset, f"达人图 {index}")
-        if media is None:
-            if path is None:
-                raise LzStudioError(f"达人图 {index} 缺少可用 URL 或本地 filePath。")
-            media = _resolve_cached_upload(
-                path,
-                kind="creator",
-                config_path=config_path,
-                uploader=uploader,
-            )
-        if path is not None:
-            creator_assets.append({"path": path, "media": media})
-        public_creators.append(
-            {
-                "fileName": asset.get("fileName") or (path.name if path else ""),
-                "url": media["url"],
-            }
-        )
-    creator_brief["creatorImages"] = public_creators
-    return {
-        "benchmark_path": benchmark_path,
-        "benchmark_media": benchmark_media,
-        "product_assets": product_assets,
-        "creator_assets": creator_assets,
-        "creator_brief": creator_brief,
-    }
-
-
-def _save_json_atomic(path: Path, value: Any) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
-    return path
-
-
-def _initialize_prompt_manifest(
-    task_id: str,
-    *,
-    model: str,
-    output_root: str | os.PathLike[str],
-    media: Mapping[str, Any],
-) -> Path:
-    try:
-        from scripts import generation_manifest
-    except ModuleNotFoundError:
-        import generation_manifest  # type: ignore[no-redef]
-
-    manifest = generation_manifest.command_init(
-        argparse.Namespace(
-            task_id=task_id,
-            model=model,
-            output_root=str(output_root),
-            reuse=False,
-        )
-    )
-    data = generation_manifest.load_manifest(manifest)
-    data["prompt_task"].update(
-        {"submit_id": task_id, "status": "submitted"}
-    )
-    for asset in media["product_assets"]:
-        local = str(asset["path"])
-        if local not in data["assets"]["product_images"]:
-            data["assets"]["product_images"].append(local)
-    local_media = list(media["product_assets"]) + list(media["creator_assets"])
-    if media.get("benchmark_path") is not None:
-        local_media.insert(
-            0,
-            {
-                "path": media["benchmark_path"],
-                "media": media["benchmark_media"],
-            },
-        )
-    for asset in local_media:
-        item = asset["media"]
-        data["public_media"][str(asset["path"])] = {
-            "url": item["url"],
-            "mimeType": item.get("mimeType", ""),
-            "expiredAt": item.get("expiredAt", ""),
-        }
-    generation_manifest.save_manifest(manifest, data)
-    return manifest
-
-
-def _balance_after_prompt(
-    manifest: Path,
-    *,
-    balance_reader: Callable[[str], int | float],
-) -> int | float | None:
-    try:
-        from scripts import generation_manifest
-    except ModuleNotFoundError:
-        import generation_manifest  # type: ignore[no-redef]
-    try:
-        balance = balance_reader("lingzhi_cli")
-    except (LzStudioError, OSError, ValueError) as exc:
-        generation_manifest.update_prompt_task(
-            manifest,
-            balance_error=str(exc)[:1000],
-        )
-        return None
-    generation_manifest.update_prompt_task(
-        manifest,
-        remaining_credits=balance,
-        balance_error="",
-    )
-    return balance
-
-
-def _poll_prompt_manifest(
-    manifest_path: str | os.PathLike[str],
-    *,
-    interval: float = 20.0,
-    poll_timeout: float = 1800.0,
-    fetcher: Callable[[str], Any] = fetch_recreate_video_prompt,
-    balance_reader: Callable[[str], int | float] = get_remaining_credits,
-    sleep: Callable[[float], None] = time.sleep,
-) -> dict[str, Any]:
-    try:
-        from scripts import generation_manifest
-    except ModuleNotFoundError:
-        import generation_manifest  # type: ignore[no-redef]
-
-    manifest = Path(manifest_path).expanduser().resolve()
-    data = generation_manifest.load_manifest(manifest)
-    task_id = str(data["prompt_task"].get("submit_id", "")).strip()
-    if not task_id:
-        raise LzStudioError("manifest 未保存拆解任务 ID。")
-    result_path = manifest.parent / "prompts" / "recreate-prompt-result.json"
-    if data["prompt_task"].get("status") == "succeeded" and result_path.is_file():
-        raw = json.loads(result_path.read_text(encoding="utf-8"))
-        return {
-            "taskId": task_id,
-            "manifestPath": str(manifest),
-            "status": "succeeded",
-            "resultPath": str(result_path),
-            "creditsConsumed": data["prompt_task"].get("credits_consumed"),
-            "remainingCredits": data["prompt_task"].get("remaining_credits"),
-            "result": _validated_recreate_output(raw),
-        }
-
-    deadline = time.monotonic() + poll_timeout
-    while True:
-        fetched_at = datetime.now(timezone.utc).isoformat()
-        try:
-            raw = fetcher(task_id)
-        except (LzStudioError, OSError, ValueError) as exc:
-            generation_manifest.update_prompt_task(
-                manifest,
-                status="running",
-                last_fetch_at=fetched_at,
-                last_error=str(exc)[:1000],
-            )
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise LzStudioError(
-                    f"任务 {task_id} 轮询超时；可使用 resume 继续。"
-                ) from None
-            sleep(min(interval, remaining))
-            continue
-
-        state = _state(raw)
-        if state in SUCCESS_STATES:
-            _save_json_atomic(result_path, raw)
-            try:
-                public_result = _validated_recreate_output(raw)
-            except LzStudioError as exc:
-                generation_manifest.update_prompt_task(
-                    manifest,
-                    status="failed",
-                    result_file=result_path,
-                    credits_consumed=_credits(raw),
-                    last_fetch_at=fetched_at,
-                    last_error=str(exc)[:1000],
-                )
-                _balance_after_prompt(manifest, balance_reader=balance_reader)
-                raise
-            credits = _credits(raw)
-            generation_manifest.update_prompt_task(
-                manifest,
-                status="succeeded",
-                result_file=result_path,
-                credits_consumed=credits,
-                last_fetch_at=fetched_at,
-                last_error="",
-            )
-            balance = _balance_after_prompt(manifest, balance_reader=balance_reader)
-            return {
-                "taskId": task_id,
-                "manifestPath": str(manifest),
-                "status": "succeeded",
-                "resultPath": str(result_path),
-                "creditsConsumed": credits,
-                "remainingCredits": balance,
-                "result": public_result,
-            }
-        if state in FAILED_STATES:
-            _save_json_atomic(result_path, raw)
-            generation_manifest.update_prompt_task(
-                manifest,
-                status="failed",
-                result_file=result_path,
-                credits_consumed=_credits(raw),
-                last_fetch_at=fetched_at,
-                last_error=_failure(raw),
-            )
-            _balance_after_prompt(manifest, balance_reader=balance_reader)
-            raise TaskFailedError(task_id, state, _failure(raw))
-        if state not in PENDING_STATES:
-            raise LzStudioError(f"未知任务状态：{state or 'missing'}")
-        generation_manifest.update_prompt_task(
-            manifest,
-            status="running",
-            last_fetch_at=fetched_at,
-            last_error="",
-        )
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise LzStudioError(
-                f"任务 {task_id} 轮询超时；可使用 resume 继续。"
-            )
-        sleep(min(interval, remaining))
-
-
-def run_recreate_video_prompt_workflow(
-    input_path: str | os.PathLike[str],
-    *,
-    output_root: str | os.PathLike[str] = "output/recreate-video",
-    config_path: str | os.PathLike[str] | None = None,
-    interval: float = 20.0,
-    poll_timeout: float = 1800.0,
-    product_builder: Callable[[Mapping[str, Any]], dict[str, Any]] = _build_workflow_product,
-    media_preparer: Callable[..., dict[str, Any]] = _prepare_workflow_media,
-    submitter: Callable[..., str] = submit_recreate_video_prompt,
-    fetcher: Callable[[str], Any] = fetch_recreate_video_prompt,
-    balance_reader: Callable[[str], int | float] = get_remaining_credits,
-    sleep: Callable[[float], None] = time.sleep,
-) -> dict[str, Any]:
-    value = _load_workflow_input(input_path)
-    has_product_images = bool(value["productBrief"]["productImages"])
-    if has_product_images:
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            product_future = executor.submit(product_builder, value["productAnalysis"])
-            media_future = executor.submit(
-                media_preparer,
-                value,
-                config_path=config_path,
-            )
-            product_brief = product_future.result()
-            media = media_future.result()
-    else:
-        product_brief = {"productName": BENCHMARK_PRODUCT_NAME}
-        media = media_preparer(
-            value,
-            config_path=config_path,
-        )
-
-    task_id = submitter(
-        media["benchmark_media"]["url"],
-        value["userConfig"],
-        product_brief,
-        media["creator_brief"],
-    )
-    manifest = _initialize_prompt_manifest(
-        task_id,
-        model=str(value["userConfig"].get("videoModel", "")),
-        output_root=output_root,
-        media=media,
-    )
-    return _poll_prompt_manifest(
-        manifest,
-        interval=interval,
-        poll_timeout=poll_timeout,
-        fetcher=fetcher,
-        balance_reader=balance_reader,
-        sleep=sleep,
-    )
-
-
-def _run_recreate_prompt_command(arguments: Sequence[str]) -> dict[str, Any]:
-    parser = argparse.ArgumentParser(prog="run_cli.py recreate-video-prompt run")
-    parser.add_argument("--input-json", required=True)
-    parser.add_argument("--output-root", default="output/recreate-video")
-    parser.add_argument("--poll-interval", type=float, default=20.0)
-    parser.add_argument("--poll-timeout", type=float, default=1800.0)
-    options = parser.parse_args(list(arguments))
-    return run_recreate_video_prompt_workflow(
-        options.input_json,
-        output_root=options.output_root,
-        interval=options.poll_interval,
-        poll_timeout=options.poll_timeout,
-    )
-
-
-def _resume_recreate_prompt_command(arguments: Sequence[str]) -> dict[str, Any]:
-    parser = argparse.ArgumentParser(prog="run_cli.py recreate-video-prompt resume")
-    parser.add_argument("--manifest", required=True)
-    parser.add_argument("--poll-interval", type=float, default=20.0)
-    parser.add_argument("--poll-timeout", type=float, default=1800.0)
-    options = parser.parse_args(list(arguments))
-    return _poll_prompt_manifest(
-        options.manifest,
-        interval=options.poll_interval,
-        poll_timeout=options.poll_timeout,
-    )
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("arguments", nargs=argparse.REMAINDER, help="Arguments passed to lzstudio.")
@@ -1868,6 +1390,17 @@ def main() -> int:
         parser.error("请提供 lzstudio 子命令。")
     if args.arguments == ["video-provider", "detect"]:
         print(json.dumps(detect_video_providers(), ensure_ascii=False))
+        return 0
+    if args.arguments == ["cli", "ensure-installed"]:
+        try:
+            try:
+                from scripts.install_lzstudio import ensure_installed
+            except ModuleNotFoundError:
+                from install_lzstudio import ensure_installed  # type: ignore[no-redef]
+            installed = ensure_installed()
+        except (OSError, RuntimeError) as exc:
+            parser.exit(1, f"{exc}\n")
+        print(json.dumps(installed, ensure_ascii=False))
         return 0
     if args.arguments == ["credential", "save"]:
         try:
@@ -1882,20 +1415,6 @@ def main() -> int:
         except LzStudioError as exc:
             parser.exit(1, f"{exc}\n")
         print(json.dumps(credential, ensure_ascii=False))
-        return 0
-    if args.arguments[:2] == ["recreate-video-prompt", "run"]:
-        try:
-            result = _run_recreate_prompt_command(args.arguments[2:])
-        except (LzStudioError, OSError, ValueError) as exc:
-            parser.exit(1, f"{exc}\n")
-        print(json.dumps(result, ensure_ascii=False))
-        return 0
-    if args.arguments[:2] == ["recreate-video-prompt", "resume"]:
-        try:
-            result = _resume_recreate_prompt_command(args.arguments[2:])
-        except (LzStudioError, OSError, ValueError) as exc:
-            parser.exit(1, f"{exc}\n")
-        print(json.dumps(result, ensure_ascii=False))
         return 0
     try:
         result = run_cli(args.arguments)
