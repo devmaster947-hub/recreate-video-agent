@@ -1,0 +1,20 @@
+# V7最终Prompt（兼容旧任务）
+
+读取锁定Segment、target Storyboard和对应版本蓝图。用户要求最高；静态视觉以target板/身份图为准，动态与声音保留原片蓝图。用KEEP/CHANGE/AUTO-DESIGN清单防止替换身份时改变剧情、表演和动作。
+
+V7从replication-package.json的entityContexts读取本段全部镜头及replacementBindings；Prompt的creatorIds必须等于完整镜头映射后的目标人物集合，不只写九格内或主达人。V6旧任务仍按anchors并集。Prompt开头逐个说明“保留原片身份”或“替换为目标身份”，禁止合并、互换或改变人种、性别、年龄、发色和脸部特征。如anchors中有人但无ID则停止Prompt交接。多Segment任务中跨段人物ID无用户图或合格生成多视图也必须停止；单Segment且用户未提供达人图时，保留文字身份描述但不要求、不生成达人图。
+
+每段prompt以参考素材职责开头：一张target板锁定画面状态，产品图锁定产品；存在合规达人图时才说明其锁定外貌。不得在Prompt中把未实际提交的达人图写成参考素材。宫格时间标签仅用于定位，不能出现在成片。按真实shot局部时间逐项描述镜头，不设置宏观阶段数量上限。同镜头关键状态不虚构硬切，Segment边界不自动当切镜。
+
+Prompt说明文全部使用中文，包括参考素材职责、格式与风格、镜头、动作、运镜、节奏、音效和禁止项。只有角色实际说出的口播原文使用目标语言；shotId、beatId、utteranceId、creatorId、产品名、节点占位符与必要专有名词可保留原文。
+
+明确起始状态→动作→结束状态、眼神、反应、停顿、情绪变化、节奏和切镜。完整保留cutPlan和dramaticBeats，未入宫格的镜头也必须写。对白逐句包含utteranceId、speakerId、局部时间、原文、情绪强度、是否出镜及lipSync。跨段保持同一Voice Setting；不得默认女性画外音、关闭BGM或将去字幕误为去人声。
+
+跨Segment对白用同一lineId关联，按蓝图实际时间分配，不重复整句；若蓝图不足以准确分配文本则停止报告，不能猜词或自动重拆。各段另存shotIds、beatIds、utteranceIds便于覆盖校验。
+
+输出videoPrompts.segments，每段含segmentId/title/duration/globalStart/globalEnd/storyboardIds/creatorIds/productPresent/shotIds/beatIds/utteranceIds/prompt。local=global-globalStart，只转换一次；窗口和板ID不得改变。
+
+字幕与UI全部禁止；只有蓝图确认剧情作用且用户允许的金额特效可保留。声音时间轴不得生成可见文字。每段完整prompt在聊天独立text代码块展示。
+
+结构化绑定可降低串声风险，不保证生成模型百分之百遵守；本版不新增音频参考、TTS或后期配音。
+V7每段使用完整镜头productIds决定productPresent，只提交replacementBindings中实际替换产品的referenceImages。原始对白保留在蓝图；目标语言对白仍逐条关联utteranceId/lineId。指令、描述用中文，不添加运行时语言检测。最终Prompt明确角色对应镜头、动作与产品持有者；不得把镜头人物并集解释为每一帧同时出现。

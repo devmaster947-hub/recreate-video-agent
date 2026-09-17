@@ -13,6 +13,7 @@ if str(SKILL_ROOT) not in sys.path:
     sys.path.insert(0, str(SKILL_ROOT))
 
 from core.product_builder import build_product_brief_string  # noqa: E402
+from core.product_builder import build_fast_product_brief_string  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--product-material-fact", action="append", default=[])
     parser.add_argument("--ai-supplement", action="append", default=[])
     parser.add_argument("--product-name", default="")
+    parser.add_argument("--product-type", default="")
     parser.add_argument("--appearance", default="")
     parser.add_argument("--product-color", default="")
     parser.add_argument("--material", default="")
@@ -28,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--structure", default="")
     parser.add_argument("--usage", default="")
     parser.add_argument("--forbidden-change", action="append", default=[])
+    parser.add_argument("--other-requirements", default="无")
+    parser.add_argument("--locked-feature", action="append", default=[])
+    parser.add_argument("--fast-brief", action="store_true")
     parser.add_argument("--compact", action="store_true")
     return parser
 
@@ -35,11 +40,23 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     try:
-        output = build_product_brief_string(
+        if args.fast_brief:
+            output = build_fast_product_brief_string(
+                product_name=args.product_name,
+                product_type=args.product_type,
+                usage=args.usage,
+                locked_features=args.locked_feature or args.forbidden_change,
+                user_claims=args.user_selling_point,
+                other_requirements=args.other_requirements,
+                pretty=not args.compact,
+            )
+        else:
+            output = build_product_brief_string(
             user_selling_points=args.user_selling_point,
             product_material_facts=args.product_material_fact,
             ai_supplements=args.ai_supplement,
             product_name=args.product_name,
+            product_type=args.product_type,
             appearance=args.appearance,
             product_color=args.product_color,
             material=args.material,
@@ -47,8 +64,9 @@ def main() -> int:
             structure=args.structure,
             usage=args.usage,
             forbidden_changes=args.forbidden_change,
+            other_requirements=args.other_requirements,
             pretty=not args.compact,
-        )
+            )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1

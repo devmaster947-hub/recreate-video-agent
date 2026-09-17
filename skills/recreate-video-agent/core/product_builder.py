@@ -16,6 +16,7 @@ SOURCE_AUTHORITY = {
 LOCAL_PATH_PATTERN = re.compile(r"(?:file://|/Users/|/home/|[A-Za-z]:[\\/])")
 PRODUCT_CARD_FIELDS = (
     "产品名称",
+    "产品类型",
     "外观",
     "产品颜色",
     "材质",
@@ -25,8 +26,14 @@ PRODUCT_CARD_FIELDS = (
     "产品卖点",
     "用户卖点锁定",
     "禁止变化项",
+    "其他要求",
 )
-SCALAR_FIELDS = PRODUCT_CARD_FIELDS[:7]
+LEGACY_PRODUCT_CARD_FIELDS = (
+    "产品名称", "外观", "产品颜色", "材质", "Logo", "结构", "使用方式",
+    "产品卖点", "用户卖点锁定", "禁止变化项",
+)
+SCALAR_FIELDS = ("产品名称", "产品类型", "外观", "产品颜色", "材质", "Logo", "结构", "使用方式", "其他要求")
+FAST_PRODUCT_CARD_FIELDS = ("产品名称", "产品类型", "使用方式", "锁定特征", "用户卖点锁定", "其他要求")
 
 
 def _clean_values(values: Iterable[str] | None) -> list[str]:
@@ -61,6 +68,7 @@ def build_product_brief(
     ai_supplements: Iterable[str] | None = None,
     *,
     product_name: str = "",
+    product_type: str = "",
     appearance: str = "",
     product_color: str = "",
     material: str = "",
@@ -68,6 +76,7 @@ def build_product_brief(
     structure: str = "",
     usage: str = "",
     forbidden_changes: Iterable[str] | None = None,
+    other_requirements: str = "无",
 ) -> dict[str, Any]:
     """Build the exact product_brief schema while preserving claim authority."""
     user = _items(user_selling_points, "user")
@@ -82,6 +91,7 @@ def build_product_brief(
     return {
         "产品卡": {
             "产品名称": _clean_scalar(product_name),
+            "产品类型": _clean_scalar(product_type),
             "外观": _clean_scalar(appearance),
             "产品颜色": _clean_scalar(product_color),
             "材质": _clean_scalar(material),
@@ -91,8 +101,49 @@ def build_product_brief(
             "产品卖点": retained,
             "用户卖点锁定": [item["text"] for item in user],
             "禁止变化项": _clean_values(forbidden_changes),
+            "其他要求": _clean_scalar(other_requirements) or "无",
         }
     }
+
+
+def build_fast_product_brief(
+    *,
+    product_name: str = "",
+    product_type: str = "",
+    usage: str = "",
+    locked_features: Iterable[str] | None = None,
+    user_claims: Iterable[str] | None = None,
+    other_requirements: str = "无",
+) -> dict[str, Any]:
+    """Build the lightweight product identity brief used by the fast Skill path."""
+    return {
+        "产品卡": {
+            "产品名称": _clean_scalar(product_name),
+            "产品类型": _clean_scalar(product_type),
+            "使用方式": _clean_scalar(usage),
+            "锁定特征": _clean_values(locked_features),
+            "用户卖点锁定": _clean_values(user_claims),
+            "其他要求": _clean_scalar(other_requirements) or "无",
+        }
+    }
+
+
+def validate_fast_product_brief(brief: Any) -> tuple[bool, list[str]]:
+    errors: list[str] = []
+    if not isinstance(brief, dict) or set(brief) != {"产品卡"} or not isinstance(brief.get("产品卡"), dict):
+        return False, ["fast product_brief must contain only the 产品卡 object."]
+    card = brief["产品卡"]
+    if tuple(card) != FAST_PRODUCT_CARD_FIELDS:
+        errors.append("轻量产品卡字段必须为：产品名称、产品类型、使用方式、锁定特征、用户卖点锁定、其他要求。")
+    for field in ("产品名称", "产品类型", "使用方式", "其他要求"):
+        value = card.get(field)
+        if not isinstance(value, str) or value != value.strip() or _contains_private_data(value):
+            errors.append(f"产品卡.{field} 必须为不含本地路径的trim字符串。")
+    for field in ("锁定特征", "用户卖点锁定"):
+        value = card.get(field)
+        if not isinstance(value, list) or value != _clean_values(value) or any(_contains_private_data(v) for v in value if isinstance(v, str)):
+            errors.append(f"产品卡.{field} 必须为去重后的字符串数组。")
+    return not errors, errors
 
 
 def _contains_private_data(text: str) -> bool:
@@ -109,12 +160,13 @@ def validate_product_brief(brief: Any) -> tuple[bool, list[str]]:
     card = brief.get("产品卡")
     if not isinstance(card, dict):
         return False, ["product_brief.产品卡 must be a JSON object."]
-    if tuple(card) != PRODUCT_CARD_FIELDS:
+    card_fields = tuple(card)
+    if card_fields not in (PRODUCT_CARD_FIELDS, LEGACY_PRODUCT_CARD_FIELDS):
         errors.append(
-            "产品卡 keys and order must be 产品名称, 外观, 产品颜色, 材质, Logo, 结构, 使用方式, 产品卖点, 用户卖点锁定, 禁止变化项."
+            "产品卡字段必须采用当前schema，或使用可兼容读取的旧schema。"
         )
 
-    for field in SCALAR_FIELDS:
+    for field in (field for field in SCALAR_FIELDS if field in card):
         value = card.get(field)
         if not isinstance(value, str):
             errors.append(f"产品卡.{field} must be a string.")
@@ -222,6 +274,7 @@ def build_product_brief_string(
     ai_supplements: Iterable[str] | None = None,
     *,
     product_name: str = "",
+    product_type: str = "",
     appearance: str = "",
     product_color: str = "",
     material: str = "",
@@ -229,6 +282,7 @@ def build_product_brief_string(
     structure: str = "",
     usage: str = "",
     forbidden_changes: Iterable[str] | None = None,
+    other_requirements: str = "无",
     pretty: bool = False,
 ) -> str:
     return serialize_product_brief(
@@ -237,6 +291,7 @@ def build_product_brief_string(
             product_material_facts,
             ai_supplements,
             product_name=product_name,
+            product_type=product_type,
             appearance=appearance,
             product_color=product_color,
             material=material,
@@ -244,6 +299,31 @@ def build_product_brief_string(
             structure=structure,
             usage=usage,
             forbidden_changes=forbidden_changes,
+            other_requirements=other_requirements,
         ),
         pretty=pretty,
     )
+
+
+def build_fast_product_brief_string(
+    *,
+    product_name: str = "",
+    product_type: str = "",
+    usage: str = "",
+    locked_features: Iterable[str] | None = None,
+    user_claims: Iterable[str] | None = None,
+    other_requirements: str = "无",
+    pretty: bool = False,
+) -> str:
+    brief = build_fast_product_brief(
+        product_name=product_name,
+        product_type=product_type,
+        usage=usage,
+        locked_features=locked_features,
+        user_claims=user_claims,
+        other_requirements=other_requirements,
+    )
+    ok, errors = validate_fast_product_brief(brief)
+    if not ok:
+        raise ValueError("; ".join(errors))
+    return json.dumps(brief, ensure_ascii=False, indent=2 if pretty else None, separators=None if pretty else (",", ":"))

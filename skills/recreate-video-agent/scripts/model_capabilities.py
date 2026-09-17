@@ -6,42 +6,42 @@ from __future__ import annotations
 from typing import Any
 
 
+LOCAL_CLI_REQUIRED_MODEL_IDS = {
+    "seedance-2-fast": "seedance2.0fast_vip",
+    "seedance-2-mini": "seedance2.0mini_vip",
+}
+
+
 MODEL_CAPABILITIES: dict[str, dict[str, Any]] = {
     "seedance-2-mini": {
-        "officialId": "seedance2.0mini_vip", "xiaoyunqueId": "seedance2.0mini_vip",
+        "dreaminaId": LOCAL_CLI_REQUIRED_MODEL_IDS["seedance-2-mini"],
+        "xiaoyunqueId": LOCAL_CLI_REQUIRED_MODEL_IDS["seedance-2-mini"],
         "minDuration": 4, "maxDuration": 15,
         "resolutions": ["720p"], "maxImages": 9,
     },
     "seedance-2-fast": {
-        "officialId": "seedance2.0fast_vip", "xiaoyunqueId": "seedance2.0fast_vip",
+        "dreaminaId": LOCAL_CLI_REQUIRED_MODEL_IDS["seedance-2-fast"],
+        "xiaoyunqueId": LOCAL_CLI_REQUIRED_MODEL_IDS["seedance-2-fast"],
         "minDuration": 4, "maxDuration": 15,
         "resolutions": ["720p"], "maxImages": 9,
     },
     "seedance-2-fast-vip": {
-        "officialId": "seedance2.0fast_vip", "minDuration": 4, "maxDuration": 15,
+        "dreaminaId": "seedance2.0fast_vip", "minDuration": 4, "maxDuration": 15,
         "resolutions": ["720p"], "maxImages": 9,
     },
     "seedance-2": {
-        "officialId": "seedance2.0_vip", "xiaoyunqueId": "seedance2.0_vip",
+        "dreaminaId": "seedance2.0_vip", "xiaoyunqueId": "seedance2.0_vip",
         "minDuration": 4, "maxDuration": 15,
         "resolutions": ["720p"], "maxImages": 9,
     },
     "seedance-2-vip": {
-        "officialId": "seedance2.0_vip", "minDuration": 4, "maxDuration": 15,
+        "dreaminaId": "seedance2.0_vip", "minDuration": 4, "maxDuration": 15,
         "resolutions": ["720p", "1080p", "4k"], "maxImages": 9,
     },
     "seedance-2-5": {
-        "officialId": "seedance2.5", "xiaoyunqueId": "seedance2.5",
+        "dreaminaId": "seedance2.5", "xiaoyunqueId": "seedance2.5",
         "minDuration": 4, "maxDuration": 30,
-        "resolutions": ["720p"], "maxImages": 9, "provisionalOfficial": True,
-    },
-    "minimax-h3": {
-        "minDuration": 4, "maxDuration": 15,
-        "resolutions": ["720p"], "maxImages": 9,
-    },
-    "grok-imagine-1-5-preview": {
-        "minDuration": 1, "maxDuration": 15,
-        "resolutions": ["720p"], "maxImages": 9,
+        "resolutions": ["720p"], "maxImages": 9, "provisionalDreamina": True,
     },
 }
 
@@ -55,9 +55,6 @@ ALIASES = {
     "seedance 2 vip": "seedance-2-vip",
     "seedance 2.5": "seedance-2-5",
     "seedance 2 5": "seedance-2-5",
-    "minimax h3": "minimax-h3",
-    "grok imagine 1.5 preview": "grok-imagine-1-5-preview",
-    "grok imagine 1 5 preview": "grok-imagine-1-5-preview",
 }
 
 
@@ -94,41 +91,3 @@ def minimum_segment_count(model: str, total_duration: int | float) -> int:
         raise ValueError(f"不支持的视频模型：{normalize_model(model)}。")
     maximum = int(limits["maxDuration"])
     return max(1, (int(float(total_duration)) + maximum - 1) // maximum)
-
-
-def plan_segment_windows(
-    model: str,
-    total_duration: int | float,
-    candidate_cuts: list[int | float] | None = None,
-    *,
-    snap_tolerance: float = 1.5,
-) -> list[dict[str, int]]:
-    numeric = float(total_duration)
-    if not numeric.is_integer():
-        raise ValueError("目标总时长必须是整数秒；不得静默取整。")
-    total = int(numeric)
-    limits = capability(model)
-    if limits is None:
-        raise ValueError(f"不支持的视频模型：{normalize_model(model)}。")
-    minimum, maximum = int(limits["minDuration"]), int(limits["maxDuration"])
-    count = minimum_segment_count(model, total)
-    if total < minimum * count:
-        raise ValueError(f"{normalize_model(model)}无法用{count}个合法Segment覆盖{total}秒。")
-    cuts = [float(value) for value in (candidate_cuts or []) if 0 < float(value) < total]
-    boundaries = [0]
-    previous = 0
-    for index in range(1, count):
-        remaining = count - index
-        low = max(previous + minimum, total - remaining * maximum)
-        high = min(previous + maximum, total - remaining * minimum)
-        ideal = total * index / count
-        nearby = [cut for cut in cuts if low <= round(cut) <= high and abs(cut - ideal) <= snap_tolerance]
-        boundary = round(min(nearby, key=lambda cut: (abs(cut - ideal), cut))) if nearby else round(ideal)
-        boundary = max(low, min(high, boundary))
-        boundaries.append(int(boundary))
-        previous = int(boundary)
-    boundaries.append(total)
-    return [
-        {"segmentId": index, "globalStart": start, "globalEnd": end, "duration": end - start}
-        for index, (start, end) in enumerate(zip(boundaries, boundaries[1:]), 1)
-    ]

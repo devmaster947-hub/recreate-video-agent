@@ -1,69 +1,57 @@
-# recreate-video-agent
+# 复刻爆款视频
 
-版本：**v4.3**
+Skill 调用名：`recreate-video-agent`
 
-用于在 Codex 中复刻 TikTok、抖音等产品视频的技能。客户端从原视频提取分段真实帧故事板，按需替换产品和达人，由灵智服务端完成 Gemini 动态拆解与 GPT 多模态提示词重构，再由客户端校验、展示提示词并在用户确认后生成视频。
+SkillHub 版本：`1.0.0`
 
-## 工作流程
+当前工作流：`V5.1 Identity Bindings`
 
-1. 确认对标视频、产品、达人、模型、时长、目标国家和语言。
-2. 按模型时长限制，为每段提取一张 3×3 真实帧故事板与 9 个时间锚点。
-3. 按需替换故事板中的产品或达人，并锁定无需修改的画格。
-4. 上传最终视觉资料，调用服务端核心工作流；本地校验返回的分段提示词。
-5. 展示完整视频提示词，取得“确认生成”后生成、拼接并质检。
+用于在 Codex 中拆解并复刻 TikTok、抖音等爆款带货视频。Skill 会保留原片的节奏、动作、镜头和声音结构，同时按需替换商品、达人和目标市场内容。
 
-详细执行规则见 [SKILL.md](SKILL.md)。
+## 工作流
 
-## 安装到 Codex
+1. 检查原视频和参考图，确认商品、达人、模型、时长、国家与语言。
+2. 本地分析媒体和候选切镜，通过灵智工坊 `RecreateVideoPromptV3` 获得服务端复刻规划。
+3. 按每个 Segment 的9个时间锚点生成唯一 3×3 真实帧 Storyboard，再使用当前智能体的原生图像能力去字和替换对象。
+4. 显示并确认每段视频 Prompt、Storyboard 和引用图。
+5. 按 `LibTV → 小云雀 CLI → 即梦 CLI` 顺序自动选择首个可用通道生成、拼接并交付成片。
 
-可以克隆仓库，或从 GitHub 下载 `v4.3` 标签对应的源码包。
+详细的授权边界、失败恢复、分段规则和素材绑定见 [SKILL.md](SKILL.md)。
 
-也可以克隆仓库，或通过 GitHub 下载仓库 ZIP 并解压：
+## 安装
 
 ```sh
 git clone https://github.com/devmaster947-hub/recreate-video-agent.git
+cp -R recreate-video-agent/skills/recreate-video-agent ~/.codex/skills/
 ```
 
-将仓库中的 `skills/recreate-video-agent` 完整目录复制到 Codex 的用户技能目录：
-
-- 默认目录：`~/.codex/skills/recreate-video-agent/`
-- 若设置了 `CODEX_HOME`：`$CODEX_HOME/skills/recreate-video-agent/`
-
-确保目录内直接包含 `SKILL.md`、`agents/`、`scripts/`、`references/`、`core/`、`utils/` 和 `cli/`。替换已有同名技能前，请将旧目录完整备份到技能目录之外。
-
-安装后在下一轮 Codex 对话中调用：
+安装后在新的 Codex 对话中调用：
 
 ```text
-$recreate-video-agent 帮我复刻这个产品视频
+$recreate-video-agent 帮我复刻这个带货视频
 ```
 
-同时提供对标视频；如需替换产品或达人，附上对应参考图。
+请同时提供已授权的对标视频；如需替换商品或达人，附上对应参考图。
 
 ## 运行条件
 
-- Python 3；视频处理需要 FFmpeg，建议同时安装 FFprobe。
-- 内置 LZStudio CLI 支持 macOS Apple Silicon 和 Windows x64。
-- 有效的灵智工坊 API Key，以及可访问的服务端 `recreate-video-prompt` 工作流。
-- 图片编辑和视频生成需要对应服务权限与额度；选用官方 Seedance 渠道时还需要配置 Dreamina CLI。
+- Python 3、FFmpeg 和 FFprobe。
+- 有效的灵智工坊 API Key；Skill 只在首次调用服务端拆解前执行按需鉴权预检。
+- 至少一个可用的视频生成通道：LibTV、小云雀 CLI 或即梦 CLI。
+- 生成任务会调用外部服务，费用与素材上传范围按实际服务和用户授权执行。
 
-首次调用时，CLI 包装脚本会把内置 LZStudio CLI 安装到用户应用目录并配置用户 PATH。API Key 可通过环境变量 `RECREATE_VIDEO_API_KEY`、本机 `~/.recreate-video/config.json` 或交互输入提供。真实凭据应保存在本机。
+Skill 内置 macOS Apple Silicon 和 Windows x64 的 LZStudio CLI。内置 CLI 只用于 `RecreateVideoPromptV3` 拆解，不用于生成图片或视频。
 
-## 服务端依赖
-
-这个仓库目录提供客户端技能。Gemini 动态拆解和 GPT 提示词重构在灵智服务端执行，客户端不包含对应核心母提示词或 n8n 工作流部署文件。使用前需确保后端支持 [服务端接口协议](references/server_prompt_generation.md) 中的 `visualContext.segments`、最终故事板与人物替换映射。
-
-安装技能不会自动部署服务端。上传素材和生成会调用外部服务，费用按实际服务规则执行。
-
-## 文件结构
+## 目录
 
 | 路径 | 用途 |
 | --- | --- |
-| `SKILL.md` | 技能入口与完整执行规则 |
-| `agents/openai.yaml` | Codex 显示信息与默认调用提示 |
-| `scripts/` | 抽帧、故事板、人物映射、服务调用、预检、生成与质检 |
-| `references/` | 各流程的规则与接口文档 |
-| `core/`、`utils/` | 产品资料与视频工具 |
-| `cli/` | macOS ARM64 与 Windows x64 的 LZStudio CLI |
-| `tests/` | 随技能提供的测试用例 |
+| `SKILL.md` | Skill 入口、流程和授权边界 |
+| `agents/openai.yaml` | Codex 展示名和默认调用提示 |
+| `scripts/` | 分析、分段、抽帧、绑定、预检、生成与交付脚本 |
+| `references/` | 按需读取的详细规则 |
+| `assets/workflows/` | 配套的服务端工作流资产 |
+| `cli/` | LZStudio CLI 内置发行文件 |
+| `tests/` | 本地回归测试 |
 
-技能名称与调用名统一为 `recreate-video-agent`，版本号为 `v4.3`，并兼容旧名称保存的技能优化方案。
+License: Apache-2.0

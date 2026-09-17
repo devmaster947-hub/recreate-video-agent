@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -19,6 +20,12 @@ from typing import Mapping, Sequence
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 PATH_BLOCK_START = "# >>> lzstudio managed path >>>"
 PATH_BLOCK_END = "# <<< lzstudio managed path <<<"
+EXPECTED_SHA256 = {
+    ("Darwin", "arm64"): "7af107fa2087782763fcfb7528aa8759326c9ca4b8a04c447b42fc55528b0e7d",
+    ("Windows", "amd64"): "f1c61d3fd5ec0ee5b6a58957494ff21cf220098e4350a4c2f89081f60bf55ab0",
+    ("Windows", "x86_64"): "f1c61d3fd5ec0ee5b6a58957494ff21cf220098e4350a4c2f89081f60bf55ab0",
+    ("Windows", "x64"): "f1c61d3fd5ec0ee5b6a58957494ff21cf220098e4350a4c2f89081f60bf55ab0",
+}
 
 
 class InstallError(RuntimeError):
@@ -42,6 +49,10 @@ def bundled_cli_path(
         raise InstallError("当前平台不支持，请使用 macOS Apple Silicon 或 Windows x64。")
     if not candidate.is_file() or candidate.stat().st_size <= 0:
         raise InstallError(f"技能内置 LZStudio CLI 缺失：{candidate}")
+    expected = EXPECTED_SHA256.get((system_name, architecture))
+    actual = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    if not expected or actual != expected:
+        raise InstallError(f"技能内置 LZStudio CLI 校验失败：{candidate}")
     return candidate
 
 
@@ -156,11 +167,11 @@ def _copy_atomic(source: Path, target: Path, *, system: str) -> None:
             temporary_path.unlink(missing_ok=True)
 
 
-def verify_version(*, timeout: float = 30.0) -> str:
-    """Run the required acceptance command through PATH."""
+def verify_version(executable: Path, *, timeout: float = 30.0) -> str:
+    """Verify the exact installed executable and its task-submit contract."""
     try:
         completed = subprocess.run(
-            ["lzstudio", "--version"],
+            [str(executable), "--version"],
             check=False,
             capture_output=True,
             text=True,
@@ -176,6 +187,21 @@ def verify_version(*, timeout: float = 30.0) -> str:
             f"验收命令 `lzstudio --version` 失败（退出码 {completed.returncode}）："
             f"{output or '未返回版本信息'}"
         )
+    try:
+        contract = subprocess.run(
+            [str(executable), "task", "submit", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            shell=False,
+            env=os.environ.copy(),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise InstallError(f"LZStudio task submit契约验证无法启动：{exc}") from None
+    help_text = contract.stdout + contract.stderr
+    if contract.returncode != 0 or "workflow-id" not in help_text or "--input" not in help_text:
+        raise InstallError("内置CLI不支持必需的`task submit --workflow-id --input`契约。")
     return output
 
 
@@ -219,7 +245,7 @@ def ensure_installed(
             os.path.normcase(item) for item in current
         }:
             os.environ["PATH"] = os.pathsep.join([str(destination_dir), *current])
-    version = verify_version() if verify else ""
+    version = verify_version(target) if verify else ""
     return {
         "installedPath": str(target),
         "pathUpdates": path_updates,

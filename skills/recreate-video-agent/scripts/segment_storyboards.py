@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compose generation-only 4x4 storyboards with segment-local timestamps."""
+"""Compose generation-only 3x3 storyboards with segment-local timestamps."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from pathlib import Path
 from typing import Any
 
 
-PANELS = 16
+PANELS = 9
 ANCHOR_METADATA_FIELDS = (
     "productPresent", "productVisibility", "productCount",
     "personPresent", "personExtent", "personCount",
-    "creatorIds", "sourceCreatorIds", "keptSourceCreatorIds", "interactionState",
+    "creatorIds", "interactionState",
 )
 
 
@@ -56,7 +56,7 @@ def normalize_segment(raw: dict[str, Any]) -> dict[str, Any]:
     if end <= start:
         raise ValueError(f"Segment {identifier} globalEnd 必须大于 globalStart。")
     if not isinstance(cells, list) or len(cells) != PANELS:
-        raise ValueError(f"Segment {identifier} 必须且只能提供16个编辑后画格。")
+        raise ValueError(f"Segment {identifier} 必须且只能提供9个编辑后画格。")
     normalized: list[dict[str, Any]] = []
     previous = -1.0
     for index, item in enumerate(cells, 1):
@@ -78,7 +78,7 @@ def normalize_segment(raw: dict[str, Any]) -> dict[str, Any]:
             "eventType": str(item.get("eventType", "context")),
         }
         for field in ANCHOR_METADATA_FIELDS:
-            if field in {"creatorIds", "sourceCreatorIds", "keptSourceCreatorIds"}:
+            if field == "creatorIds":
                 anchor[field] = [str(value) for value in item.get(field, [])]
             elif field in item:
                 anchor[field] = item[field]
@@ -105,36 +105,37 @@ def render(segment: dict[str, Any], output: Path, ffmpeg: str, ffprobe: str | No
     if not 1 <= label_height < height:
         raise ValueError("labelHeight必须小于画格高度。")
     frame_height = height - label_height
-    command = [ffmpeg, "-y"]
-    for cell in cells:
-        command.extend(["-i", cell["file"]])
-    filters: list[str] = []
-    labels: list[str] = []
-    for offset, cell in enumerate(cells):
-        label = f"c{offset}"
-        local = float(cell["localTimestamp"])
-        text = f"{offset + 1:02d} · {local:.2f}s"
-        filters.append(
-            f"[{offset}:v]crop={width}:{frame_height}:0:0,"
-            f"scale={width}:{frame_height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{frame_height}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"pad={width}:{height}:0:0:black,"
-            f"drawtext=text='{text}':x=8:y={frame_height + 7}:fontsize=20:fontcolor=white,"
-            f"drawbox=x=0:y=0:w=iw:h=ih:color=white@0.55:t=1[{label}]"
-        )
-        labels.append(f"[{label}]")
-    layout = "|".join(f"{column * width}_{row * height}" for row in range(4) for column in range(4))
-    filters.append("".join(labels) + f"xstack=inputs=16:layout={layout}[out]")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    command.extend(["-filter_complex", ";".join(filters), "-map", "[out]", "-frames:v", "1", str(output)])
-    run(command)
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ModuleNotFoundError:
+        Image = ImageDraw = ImageFont = None
+    if Image is not None:
+        font_path = Path("/System/Library/Fonts/Supplemental/Arial.ttf")
+        font = ImageFont.truetype(str(font_path), 20) if font_path.is_file() else ImageFont.load_default()
+        board = Image.new("RGB", (width * 3, height * 3), "black")
+        for offset, cell in enumerate(cells):
+            with Image.open(cell["file"]) as source:
+                visual = source.convert("RGB").crop((0, 0, width, frame_height))
+            if visual.size != (width, frame_height):
+                visual = visual.resize((width, frame_height), Image.Resampling.LANCZOS)
+            panel = Image.new("RGB", (width, height), "black")
+            panel.paste(visual, (0, 0))
+            draw = ImageDraw.Draw(panel)
+            draw.text((8, frame_height + 7), f"{offset + 1:02d} · {float(cell['localTimestamp']):.2f}s", font=font, fill="white")
+            draw.rectangle((0, 0, width - 1, height - 1), outline=(255, 255, 255), width=1)
+            row, column = divmod(offset, 3)
+            board.paste(panel, (column * width, row * height))
+        output.parent.mkdir(parents=True, exist_ok=True)
+        board.save(output)
+    else:
+        _render_with_ffmpeg(cells, output, ffmpeg, width, height, frame_height)
     if not output.is_file() or output.stat().st_size <= 0:
         raise RuntimeError(f"未生成段内 Storyboard：{output}")
     result = {
         "storyboardId": int(segment["segmentId"]),
         "segmentId": int(segment["segmentId"]),
         "file": str(output.resolve()),
-        "layout": "4x4",
+        "layout": "3x3",
         "globalStart": float(segment["globalStart"]),
         "globalEnd": float(segment["globalEnd"]),
         "localStart": 0.0,
@@ -155,6 +156,32 @@ def render(segment: dict[str, Any], output: Path, ffmpeg: str, ffprobe: str | No
     return result
 
 
+def _render_with_ffmpeg(cells: list[dict[str, Any]], output: Path, ffmpeg: str, width: int, height: int, frame_height: int) -> None:
+    command = [ffmpeg, "-y"]
+    for cell in cells:
+        command.extend(["-i", cell["file"]])
+    filters: list[str] = []
+    labels: list[str] = []
+    for offset, cell in enumerate(cells):
+        label = f"c{offset}"
+        local = float(cell["localTimestamp"])
+        text = f"{offset + 1:02d} · {local:.2f}s"
+        filters.append(
+            f"[{offset}:v]crop={width}:{frame_height}:0:0,"
+            f"scale={width}:{frame_height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{frame_height}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"pad={width}:{height}:0:0:black,"
+            f"drawtext=text='{text}':x=8:y={frame_height + 7}:fontsize=20:fontcolor=white,"
+            f"drawbox=x=0:y=0:w=iw:h=ih:color=white@0.55:t=1[{label}]"
+        )
+        labels.append(f"[{label}]")
+    layout = "|".join(f"{column * width}_{row * height}" for row in range(3) for column in range(3))
+    filters.append("".join(labels) + f"xstack=inputs=9:layout={layout}[out]")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    command.extend(["-filter_complex", ";".join(filters), "-map", "[out]", "-frames:v", "1", str(output)])
+    run(command)
+
+
 def build(plan: dict[str, Any], output_dir: Path, ffmpeg: str, ffprobe: str | None) -> dict[str, Any]:
     raw_segments = plan.get("segments") if isinstance(plan, dict) else None
     if not isinstance(raw_segments, list) or not raw_segments:
@@ -166,10 +193,10 @@ def build(plan: dict[str, Any], output_dir: Path, ffmpeg: str, ffprobe: str | No
     for segment in segments:
         if abs(float(segment["globalStart"]) - cursor) > .01:
             raise ValueError("Segment 全局时间轴必须从0开始并连续、无重叠、无空档。")
-        output = output_dir / f"segment-{int(segment['segmentId']):02d}-storyboard-4x4.png"
+        output = output_dir / f"segment-{int(segment['segmentId']):02d}-storyboard-3x3.png"
         boards.append(render(segment, output, ffmpeg, ffprobe))
         cursor = float(segment["globalEnd"])
-    return {"schemaRevision": "5.1", "layout": "4x4", "boards": boards, "totalDuration": cursor}
+    return {"schemaRevision": "5.1", "layout": "3x3", "boards": boards, "totalDuration": cursor}
 
 
 def main() -> int:
@@ -184,7 +211,7 @@ def main() -> int:
         result = build(
             json.loads(Path(args.plan).expanduser().resolve().read_text(encoding="utf-8")),
             output_dir,
-            str(executable("ffmpeg", args.ffmpeg)),
+            str(executable("ffmpeg", args.ffmpeg, required_filter="drawtext")),
             executable("ffprobe", args.ffprobe, required=False),
         )
         metadata = output_dir / "segment-storyboard-metadata.json"

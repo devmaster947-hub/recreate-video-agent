@@ -1,0 +1,7 @@
+{
+  "lzstudioVersion": "0.0.5",
+  "artifacts": {
+    "windows-x64/lzstudio.exe": "f1c61d3fd5ec0ee5b6a58957494ff21cf220098e4350a4c2f89081f60bf55ab0",
+    "macos-arm64/lzstudio": "7af107fa2087782763fcfb7528aa8759326c9ca4b8a04c447b42fc55528b0e7d"
+  }
+}

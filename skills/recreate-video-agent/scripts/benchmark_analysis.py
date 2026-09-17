@@ -4,32 +4,100 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.model_capabilities import capability, normalize_model, plan_segment_windows
+    from scripts.model_capabilities import capability, normalize_model, minimum_segment_count
+    from scripts.visual_scan import (
+        DEFAULT_CHANGE_THRESHOLD,
+        DEFAULT_CUT_THRESHOLD,
+        VISUAL_SCAN_VERSION,
+        scan_video,
+    )
 except ModuleNotFoundError:
-    from model_capabilities import capability, normalize_model, plan_segment_windows
+    from model_capabilities import capability, normalize_model, minimum_segment_count
+    from visual_scan import (
+        DEFAULT_CHANGE_THRESHOLD,
+        DEFAULT_CUT_THRESHOLD,
+        VISUAL_SCAN_VERSION,
+        scan_video,
+    )
 
 
 PTS = re.compile(r"pts_time:([0-9.]+)")
-BLACK = re.compile(r"black_start:([0-9.]+).*?black_end:([0-9.]+)")
-MEAN = re.compile(r"mean_volume:\s*(-?[0-9.]+) dB")
-MAX = re.compile(r"max_volume:\s*(-?[0-9.]+) dB")
 DURATION = re.compile(r"Duration:\s*(\d+):(\d+):([0-9.]+)")
 VIDEO_LINE = re.compile(r"Video:\s*([^,]+).*?,\s*(\d{2,5})x(\d{2,5})")
 FPS = re.compile(r"([0-9.]+)\s*fps")
 AUDIO_LINE = re.compile(r"Audio:\s*([^,]+).*?(\d{4,6}) Hz")
+MAX_BENCHMARK_DURATION_SECONDS = 360.0
+
+
+def analysis_cache_input(
+    video: Path,
+    model: str,
+    duration_mode: str,
+    target_duration: int | None,
+    scene_threshold: float,
+    visual_change_threshold: float = DEFAULT_CHANGE_THRESHOLD,
+    visual_scan_fps: float | None = None,
+) -> dict[str, Any]:
+    stat = video.stat()
+    return {
+        "video": str(video),
+        "size": stat.st_size,
+        "mtimeNs": stat.st_mtime_ns,
+        "model": normalize_model(model),
+        "durationMode": duration_mode,
+        "targetDuration": target_duration,
+        "visualCutThreshold": scene_threshold,
+        "visualChangeThreshold": visual_change_threshold,
+        "visualScanFps": visual_scan_fps,
+        "visualScanVersion": VISUAL_SCAN_VERSION,
+    }
+
+
+def analysis_fingerprint(value: dict[str, Any]) -> str:
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def load_cached_analysis(output: Path, cache_input: dict[str, Any]) -> dict[str, Any] | None:
+    if not output.is_file():
+        return None
+    try:
+        value = json.loads(output.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    expected = analysis_fingerprint(cache_input)
+    if value.get("analysisFingerprint") != expected or value.get("analysisInput") != cache_input:
+        return None
+    if not isinstance(value.get("media"), dict) or not isinstance(value.get("recommendedSegments"), list):
+        return None
+    return value
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, capture_output=True, check=False)
+
+
+def validate_benchmark_duration(duration: int | float) -> float:
+    numeric = float(duration)
+    if not math.isfinite(numeric) or numeric <= 0:
+        raise ValueError("无法读取有效的对标视频时长。")
+    if numeric > MAX_BENCHMARK_DURATION_SECONDS:
+        raise ValueError(
+            f"对标视频时长{numeric:.3f}秒超过6分钟（360秒）上限，拒绝复刻；"
+            "不能通过仅复刻开场或自定义较短时长绕过。"
+        )
+    return numeric
 
 
 def probe(ffprobe: str | None, video: Path, ffmpeg: str | None = None) -> dict[str, Any]:
@@ -71,39 +139,44 @@ def probe(ffprobe: str | None, video: Path, ffmpeg: str | None = None) -> dict[s
     }
 
 
-def analyze(ffmpeg: str, ffprobe: str | None, video: Path, threshold: float = 0.30) -> dict[str, Any]:
-    media = probe(ffprobe, video, ffmpeg)
-    scene = run([
-        ffmpeg, "-hide_banner", "-i", str(video), "-vf",
-        f"select='gt(scene,{threshold})',showinfo", "-an", "-f", "null", "-",
-    ])
-    cuts = sorted({round(float(value), 3) for value in PTS.findall(scene.stderr)})
-    black = run([
-        ffmpeg, "-hide_banner", "-i", str(video), "-vf",
-        "blackdetect=d=0.08:pix_th=0.10", "-an", "-f", "null", "-",
-    ])
-    black_ranges = [
-        {"start": float(start), "end": float(end)} for start, end in BLACK.findall(black.stderr)
-    ]
-    audio: dict[str, Any] = {"present": media["hasAudio"]}
-    if media["hasAudio"]:
-        volume = run([
-            ffmpeg, "-hide_banner", "-i", str(video), "-vn", "-af", "volumedetect",
-            "-f", "null", "-",
-        ])
-        mean = MEAN.search(volume.stderr)
-        maximum = MAX.search(volume.stderr)
-        audio.update({
-            "meanVolumeDb": float(mean.group(1)) if mean else None,
-            "maxVolumeDb": float(maximum.group(1)) if maximum else None,
-        })
+def analyze(
+    ffmpeg: str,
+    ffprobe: str | None,
+    video: Path,
+    threshold: float = DEFAULT_CUT_THRESHOLD,
+    *,
+    change_threshold: float = DEFAULT_CHANGE_THRESHOLD,
+    scan_duration: float | None = None,
+    scan_fps: float | None = None,
+    media: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    media = media or probe(ffprobe, video, ffmpeg)
+    validate_benchmark_duration(media["duration"])
+    window = min(float(scan_duration or media["duration"]), float(media["duration"]))
+    scan = scan_video(
+        ffmpeg,
+        video,
+        duration=window,
+        fps=scan_fps,
+        change_threshold=change_threshold,
+        cut_threshold=threshold,
+    )
     return {
         "media": media,
-        "candidateCuts": cuts,
-        "blackRanges": black_ranges,
-        "audio": audio,
-        "sceneThreshold": threshold,
-        "note": "候选切镜仅用于 Codex 复核，不得替代完整视频视觉判断。",
+        "candidateCuts": scan["candidateCuts"],
+        "visualCandidates": scan["visualCandidates"],
+        "visualScan": {
+            "version": scan["version"],
+            "fps": scan["fps"],
+            "width": scan["width"],
+            "height": scan["height"],
+            "sampleCount": scan["sampleCount"],
+            "changeThreshold": scan["changeThreshold"],
+            "cutThreshold": scan["cutThreshold"],
+            "samples": scan["samples"],
+        },
+        "audio": {"present": media["hasAudio"]},
+        "note": "单次低清视觉扫描同时提供切镜候选、连续动作变化和清晰帧评分；不使用大模型选帧。",
     }
 
 
@@ -134,23 +207,17 @@ def resolve_replication_duration(
     limits = capability(model)
     if limits is None:
         raise ValueError(f"不支持的视频模型：{normalize_model(model)}。")
-    source = float(source_duration)
+    source = validate_benchmark_duration(source_duration)
     minimum = int(limits["minDuration"])
     mode = str(duration_mode or "source").strip().lower()
-    if mode not in {"source", "opening_10", "custom"}:
-        raise ValueError("durationMode 必须是 source、opening_10 或 custom。")
+    if mode not in {"source", "custom"}:
+        raise ValueError("durationMode 必须是 source 或 custom。")
     if mode == "source":
         if requested_duration is not None:
             raise ValueError("source 模式不得提供自定义时长。")
         target = normalized_source_duration(source, minimum)
         requested = None
         source_label = "source_nearest_integer"
-    elif mode == "opening_10":
-        if requested_duration not in (None, 10):
-            raise ValueError("opening_10 模式固定为开场10秒。")
-        target = 10 if source >= 10 else normalized_source_duration(source, minimum)
-        requested = 10
-        source_label = "opening_10"
     else:
         if isinstance(requested_duration, bool) or not isinstance(requested_duration, int) or requested_duration <= 0:
             raise ValueError("custom 模式必须提供正整数秒 requestedDuration。")
@@ -159,7 +226,9 @@ def resolve_replication_duration(
         target = requested_duration
         requested = requested_duration
         source_label = "custom"
-    plan_segment_windows(model, target)
+    count = minimum_segment_count(model, target)
+    if target < minimum * count:
+        raise ValueError(f"{normalize_model(model)}无法用最少{count}个合法Segment覆盖{target}秒。")
     return {
         "durationMode": mode,
         "requestedDuration": requested,
@@ -173,10 +242,17 @@ def resolve_replication_duration(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--video", required=True)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--scene-threshold", type=float, default=0.30)
+    parser.add_argument("--output")
+    parser.add_argument(
+        "--duration-check-only", action="store_true",
+        help="只读取并校验对标视频时长；用于展示启动确认单前的免费本地硬门槛。",
+    )
+    parser.add_argument("--visual-cut-threshold", type=float, default=DEFAULT_CUT_THRESHOLD)
+    parser.add_argument("--visual-change-threshold", type=float, default=DEFAULT_CHANGE_THRESHOLD)
+    parser.add_argument("--visual-scan-fps", type=float)
+    parser.add_argument("--scene-threshold", type=float, help=argparse.SUPPRESS)
     parser.add_argument("--model", default="seedance-2-fast")
-    parser.add_argument("--duration-mode", choices=("source", "opening_10", "custom"))
+    parser.add_argument("--duration-mode", choices=("source", "custom"))
     parser.add_argument("--target-duration", type=int)
     parser.add_argument("--ffmpeg")
     parser.add_argument("--ffprobe")
@@ -185,16 +261,57 @@ def main() -> int:
         video = Path(args.video).expanduser().resolve()
         if not video.is_file() or video.stat().st_size <= 0:
             raise ValueError(f"对标视频不存在或为空：{video}")
+        ffmpeg = str(resolve("ffmpeg", args.ffmpeg))
+        ffprobe = resolve("ffprobe", args.ffprobe, required=False)
+        if args.duration_check_only:
+            media = probe(ffprobe, video, ffmpeg)
+            duration = validate_benchmark_duration(media["duration"])
+            print(json.dumps({"ok": True, "video": str(video), "duration": duration, "maximumDuration": MAX_BENCHMARK_DURATION_SECONDS}, ensure_ascii=False))
+            return 0
+        if not args.output:
+            raise ValueError("完整分析必须提供 --output。")
         output = Path(args.output).expanduser().resolve()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        value = analyze(str(resolve("ffmpeg", args.ffmpeg)), resolve("ffprobe", args.ffprobe, required=False), video, args.scene_threshold)
-        source_duration = float(value["media"]["duration"])
         duration_mode = args.duration_mode or ("custom" if args.target_duration is not None else "source")
+        effective_cut_threshold = (
+            args.scene_threshold if args.scene_threshold is not None else args.visual_cut_threshold
+        )
+        cache_input = analysis_cache_input(
+            video,
+            args.model,
+            duration_mode,
+            args.target_duration,
+            effective_cut_threshold,
+            args.visual_change_threshold,
+            args.visual_scan_fps,
+        )
+        cached = load_cached_analysis(output, cache_input)
+        if cached is not None:
+            print(json.dumps({"ok": True, "output": str(output), "reused": True, **cached}, ensure_ascii=False))
+            return 0
+        output.parent.mkdir(parents=True, exist_ok=True)
+        started = time.perf_counter()
+        media = probe(ffprobe, video, ffmpeg)
+        source_duration = float(media["duration"])
         duration = resolve_replication_duration(source_duration, args.model, duration_mode, args.target_duration)
+        value = analyze(
+            ffmpeg,
+            ffprobe,
+            video,
+            effective_cut_threshold,
+            change_threshold=args.visual_change_threshold,
+            scan_duration=float(duration["targetDuration"]),
+            scan_fps=args.visual_scan_fps,
+            media=media,
+        )
         value.update(duration)
-        value["recommendedSegments"] = plan_segment_windows(args.model, value["targetDuration"], value["candidateCuts"])
+        value["sourceFile"] = str(video)
+        # 最终Segment/Storyboard anchors由服务端replicationPlan决定；本地不生成最终或候选分段。
+        value["recommendedSegments"] = []
+        value["analysisInput"] = cache_input
+        value["analysisFingerprint"] = analysis_fingerprint(cache_input)
+        value["stageTimings"] = {"technicalAnalysisSeconds": round(time.perf_counter() - started, 3)}
         output.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(json.dumps({"ok": True, "output": str(output), **value}, ensure_ascii=False))
+        print(json.dumps({"ok": True, "output": str(output), "reused": False, **value}, ensure_ascii=False))
         return 0
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
         raise SystemExit(str(exc)) from None

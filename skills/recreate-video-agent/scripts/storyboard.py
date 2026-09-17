@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Extract real video frames and compose one fixed 4x4 board per Segment."""
+"""Extract real video frames and compose one fixed 3x3 board per Segment."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +19,7 @@ except ModuleNotFoundError:
     from model_capabilities import minimum_segment_count, validate_generation
 
 
-PANELS_PER_BOARD = 16
+PANELS_PER_BOARD = 9
 ALLOWED_ROLES = {"hard", "soft", "context"}
 ALLOWED_EVENTS = {
     "first_frame", "continuity_start", "cut", "hook", "product_first",
@@ -25,6 +28,7 @@ ALLOWED_EVENTS = {
 }
 PRODUCT_VISIBILITY = {"none", "partial", "full"}
 PERSON_EXTENT = {"none", "partial", "full"}
+SEMANTIC_SOURCES = {"observed", "unobserved"}
 
 
 def normalize_presence(
@@ -59,7 +63,7 @@ def normalize_presence(
 def normalize_anchor(value: Any, index: int) -> dict[str, Any]:
     item = value if isinstance(value, dict) else {"timestamp": value}
     timestamp = item.get("timestamp", item.get("time"))
-    if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or timestamp < 0:
+    if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or not math.isfinite(timestamp) or timestamp < 0:
         raise ValueError(f"无效时间戳：{timestamp!r}")
     role = str(item.get("anchorRole", "hard" if index == 0 else "soft"))
     event = str(item.get("eventType", "first_frame" if index == 0 else "context"))
@@ -67,12 +71,12 @@ def normalize_anchor(value: Any, index: int) -> dict[str, Any]:
         raise ValueError(f"无效 anchorRole：{role}")
     if event not in ALLOWED_EVENTS:
         raise ValueError(f"无效 eventType：{event}")
+    semantic_source = str(item.get("semanticSource", "observed"))
+    if semantic_source not in SEMANTIC_SOURCES:
+        raise ValueError("anchor.semanticSource 必须是 observed 或 unobserved。")
     creators = item.get("creatorIds", [])
-    source_creators = item.get("sourceCreatorIds", [])
     if not isinstance(creators, list):
         raise ValueError("anchor.creatorIds 必须是数组。")
-    if not isinstance(source_creators, list):
-        raise ValueError("anchor.sourceCreatorIds 必须是数组。")
     product_present, product_visibility, product_count = normalize_presence(
         item,
         present_key="productPresent",
@@ -86,14 +90,13 @@ def normalize_anchor(value: Any, index: int) -> dict[str, Any]:
         state_key="personExtent",
         count_key="personCount",
         allowed_states=PERSON_EXTENT,
-        inferred_present=bool(creators or source_creators),
+        inferred_present=bool(creators),
     )
     return {
         "timestamp": float(timestamp),
-        "shotId": str(item.get("shotId", "")),
+        "shotId": item.get("shotId", ""),
         "anchorRole": role,
         "eventType": event,
-        "importance": int(item.get("importance", 5 if role == "hard" else 3)),
         "productPresent": product_present,
         "productVisibility": product_visibility,
         "productCount": product_count,
@@ -101,9 +104,8 @@ def normalize_anchor(value: Any, index: int) -> dict[str, Any]:
         "personExtent": person_extent,
         "personCount": person_count,
         "creatorIds": [str(identifier) for identifier in creators],
-        "sourceCreatorIds": [str(identifier) for identifier in source_creators],
-        "keptSourceCreatorIds": [str(identifier) for identifier in item.get("keptSourceCreatorIds", [])],
         "interactionState": str(item.get("interactionState", "")),
+        "semanticSource": semantic_source,
     }
 
 
@@ -112,16 +114,16 @@ def normalize_segment(raw: dict[str, Any], expected_id: int) -> dict[str, Any]:
     if identifier != expected_id:
         raise ValueError("Segment ID 必须从1开始连续递增。")
     start, end = float(raw["globalStart"]), float(raw["globalEnd"])
-    if end <= start:
+    if not all(math.isfinite(t) for t in (start, end)) or end <= start:
         raise ValueError(f"Segment {identifier} globalEnd 必须大于 globalStart。")
     values = raw.get("anchors")
-    if not isinstance(values, list) or len(values) != PANELS_PER_BOARD:
-        raise ValueError(f"Segment {identifier} 必须且只能包含16个anchors。")
+    if not isinstance(values, list) or len(values) not in (9, 16):
+        raise ValueError(f"Segment {identifier} 必须包含9或16个anchors。")
     anchors = [normalize_anchor(value, index) for index, value in enumerate(values)]
     timestamps = [item["timestamp"] for item in anchors]
-    if timestamps != sorted(timestamps):
-        raise ValueError(f"Segment {identifier} anchors必须按时间升序排列。")
-    if any(value < start - .01 or value > end + .01 for value in timestamps):
+    if any(a >= b for a,b in zip(timestamps,timestamps[1:])):
+        raise ValueError(f"Segment {identifier} anchors必须按时间严格升序排列，不得重复。")
+    if any(value < start - .01 or value >= end for value in timestamps):
         raise ValueError(f"Segment {identifier} anchor超出自身时间窗。")
     if abs(timestamps[0] - start) > .05:
         raise ValueError(f"Segment {identifier} 第一格必须是分段起点。")
@@ -146,7 +148,7 @@ def parse_segment_plan(path: Path, *, media_duration: float | None = None) -> li
     else:
         values = raw.get("anchors", raw.get("timestamps")) if isinstance(raw, dict) else raw
         if not isinstance(values, list) or not values or len(values) % PANELS_PER_BOARD:
-            raise ValueError("输入必须含segments，或提供16的整数倍数量的anchors/timestamps。")
+            raise ValueError("输入必须含segments，或提供9的整数倍数量的anchors/timestamps。")
         normalized = [normalize_anchor(value, index) for index, value in enumerate(values)]
         segments = []
         for offset in range(0, len(normalized), PANELS_PER_BOARD):
@@ -155,7 +157,7 @@ def parse_segment_plan(path: Path, *, media_duration: float | None = None) -> li
             start = anchors[0]["timestamp"]
             next_offset = offset + PANELS_PER_BOARD
             end = normalized[next_offset]["timestamp"] if next_offset < len(normalized) else float(media_duration or anchors[-1]["timestamp"])
-            if end <= start:
+            if not all(math.isfinite(t) for t in (start, end)) or end <= start:
                 raise ValueError("旧版anchors无法推导有效Segment时间窗；请改用segments格式。")
             if identifier > 1 and anchors[0]["eventType"] == "first_frame":
                 anchors[0]["eventType"] = "continuity_start"
@@ -210,6 +212,80 @@ def run(command: list[str]) -> None:
         raise RuntimeError(completed.stderr[-2000:] or "视频帧处理失败。")
 
 
+def resolve_ffmpeg(value: str | None) -> str:
+    candidates: list[str] = []
+    if value and value != "ffmpeg":
+        candidates.append(value if "/" in value or "\\" in value else str(shutil.which(value) or ""))
+    local = Path.home() / ".local" / "bin" / "ffmpeg"
+    if local.is_file():
+        candidates.append(str(local))
+    candidates.append(str(shutil.which("ffmpeg") or ""))
+    checked: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in checked:
+            continue
+        checked.add(candidate)
+        result = subprocess.run([candidate, "-hide_banner", "-filters"], text=True, capture_output=True, check=False)
+        if result.returncode == 0 and any(line.split()[1:2] == ["drawtext"] for line in result.stdout.splitlines()):
+            return candidate
+    raise ValueError("当前环境没有带 drawtext 滤镜的 ffmpeg，无法渲染Storyboard时间标签。")
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def board_fingerprint(video_sha256: str, segment: dict[str, Any], cell_width: int, cell_height: int) -> str:
+    payload = {
+        "videoSha256": video_sha256,
+        "segmentId": segment["segmentId"],
+        "globalStart": segment["globalStart"],
+        "globalEnd": segment["globalEnd"],
+        "anchors": segment["anchors"],
+        "cellWidth": cell_width,
+        "cellHeight": cell_height,
+        "renderer": "storyboard-3x3-v2",
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def render_or_reuse(
+    ffmpeg: str,
+    video: Path,
+    video_sha256: str,
+    segment: dict[str, Any],
+    output: Path,
+    cell_width: int,
+    cell_height: int,
+    *,
+    force: bool = False,
+) -> bool:
+    """Render one board and return True when an unchanged cached board was reused."""
+    cache = output.with_suffix(".cache.json")
+    fingerprint = board_fingerprint(video_sha256, segment, cell_width, cell_height)
+    if not force and output.is_file() and cache.is_file():
+        try:
+            record = json.loads(cache.read_text(encoding="utf-8"))
+            if record.get("inputSha256") == fingerprint and record.get("outputSha256") == file_sha256(output):
+                return True
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+    render_board(ffmpeg, video, segment["anchors"], output, cell_width, cell_height)
+    temporary = cache.with_suffix(cache.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps({"inputSha256": fingerprint, "outputSha256": file_sha256(output)}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(cache)
+    return False
+
+
 def render_board(ffmpeg: str, video: Path, anchors: list[dict[str, Any]], output: Path, cell_width: int, cell_height: int) -> None:
     command = [ffmpeg, "-y"]
     for anchor in anchors:
@@ -228,8 +304,9 @@ def render_board(ffmpeg: str, video: Path, anchors: list[dict[str, Any]], output
             f"drawtext=text='{text}':x=8:y={frame_height + 7}:fontsize=20:fontcolor=white,"
             f"drawbox=x=0:y=0:w=iw:h=ih:color=white@0.55:t=1[{label}]"
         )
-    layout = "|".join(f"{column * cell_width}_{row * cell_height}" for row in range(4) for column in range(4))
-    filters.append("".join(labels) + f"xstack=inputs=16:layout={layout}[board]")
+    side = math.isqrt(len(anchors))
+    layout = "|".join(f"{column * cell_width}_{row * cell_height}" for row in range(side) for column in range(side))
+    filters.append("".join(labels) + f"xstack=inputs={len(anchors)}:layout={layout}[board]")
     output.parent.mkdir(parents=True, exist_ok=True)
     command.extend(["-filter_complex", ";".join(filters), "-map", "[board]", "-frames:v", "1", "-compression_level", "3", str(output)])
     run(command)
@@ -247,6 +324,8 @@ def main() -> int:
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--analysis-file")
     parser.add_argument("--model", default="seedance-2-fast")
+    parser.add_argument("--max-workers", type=int, default=0, help="0 means up to 4 Segment renders in parallel.")
+    parser.add_argument("--force-render", action="store_true", help="Ignore valid board caches and render again.")
     args = parser.parse_args()
 
     video = Path(args.video).expanduser().resolve()
@@ -254,37 +333,45 @@ def main() -> int:
     output_dir = Path(args.output_dir).expanduser().resolve()
     if not video.is_file() or video.stat().st_size <= 0:
         raise SystemExit(f"对标视频不存在或为空：{video}")
-    ffmpeg = args.ffmpeg if "/" in args.ffmpeg or "\\" in args.ffmpeg else shutil.which(args.ffmpeg)
-    if not ffmpeg:
-        local = Path.home() / ".local" / "bin" / "ffmpeg"
-        ffmpeg = str(local) if local.is_file() else None
-    if not ffmpeg:
-        raise SystemExit("当前运行环境没有可用的视频帧处理能力。")
     try:
+        ffmpeg = resolve_ffmpeg(args.ffmpeg)
         analysis = json.loads(Path(args.analysis_file).read_text(encoding="utf-8")) if args.analysis_file else {}
         media_duration = float(analysis.get("targetDuration") or analysis.get("media", {}).get("duration") or 0) or None
         segments = parse_segment_plan(timestamp_file, media_duration=media_duration)
         validate_model_windows(segments, args.model)
         if analysis:
             validate_against_analysis(segments, analysis)
-        boards: list[dict[str, Any]] = []
-        for segment in segments:
+        workers = args.max_workers or min(4, len(segments))
+        if workers < 1:
+            raise ValueError("--max-workers 必须大于0，或使用0采用默认并行度。")
+        video_digest = file_sha256(video)
+
+        def build(segment: dict[str, Any]) -> dict[str, Any]:
             identifier = int(segment["segmentId"])
-            output = output_dir / f"segment-{identifier:02d}-storyboard-4x4.png"
-            render_board(ffmpeg, video, segment["anchors"], output, args.cell_width, args.cell_height)
-            boards.append({
+            side = math.isqrt(len(segment["anchors"]))
+            output = output_dir / f"segment-{identifier:02d}-storyboard-{side}x{side}.png"
+            reused = render_or_reuse(
+                ffmpeg, video, video_digest, segment, output, args.cell_width, args.cell_height,
+                force=args.force_render,
+            )
+            return {
                 "storyboardId": identifier,
                 "segmentId": identifier,
                 "file": str(output.resolve()),
-                "layout": "4x4",
+                "layout": f"{side}x{side}",
+                "reused": reused,
                 "globalStart": segment["globalStart"],
                 "globalEnd": segment["globalEnd"],
                 "duration": segment["duration"],
                 "anchors": segment["anchors"],
-            })
+            }
+
+        with ThreadPoolExecutor(max_workers=min(workers, len(segments))) as pool:
+            boards = list(pool.map(build, segments))
+        boards.sort(key=lambda item: int(item["segmentId"]))
         metadata = output_dir / "storyboard-metadata.json"
-        metadata.write_text(json.dumps({"schemaRevision": "5.1", "layout": "4x4", "boards": boards, "totalDuration": segments[-1]["globalEnd"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(json.dumps({"ok": True, "layout": "4x4", "outputs": [item["file"] for item in boards], "metadata": str(metadata), "boards": boards}, ensure_ascii=False))
+        metadata.write_text(json.dumps({"schemaRevision": "5.1", "layout": "3x3", "boards": boards, "totalDuration": segments[-1]["globalEnd"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({"ok": True, "layout": "3x3", "outputs": [item["file"] for item in boards], "metadata": str(metadata), "boards": boards}, ensure_ascii=False))
         return 0
     except (OSError, ValueError, RuntimeError, KeyError, json.JSONDecodeError) as exc:
         raise SystemExit(str(exc)) from None

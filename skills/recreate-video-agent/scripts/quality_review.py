@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create aligned local review artifacts and finalize the strict v4.1 score."""
+"""Create non-blocking aligned quality reports for generated videos."""
 
 from __future__ import annotations
 
@@ -27,12 +27,21 @@ WEIGHTS = {
 
 
 def resolve(name: str, value: str | None = None) -> str:
-    found = value or shutil.which(name)
     local = Path.home() / ".local" / "bin" / name
-    result = found or (str(local) if local.is_file() else "")
-    if not result:
-        raise ValueError(f"当前环境缺少 {name}。")
-    return result
+    found = shutil.which(name)
+    candidates = [value, str(local) if local.is_file() else None, found]
+    checked: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in checked:
+            continue
+        checked.add(candidate)
+        if name == "ffmpeg":
+            probe = subprocess.run([candidate, "-hide_banner", "-filters"], text=True, capture_output=True, check=False)
+            if probe.returncode or not any(line.split()[1:2] == ["drawtext"] for line in probe.stdout.splitlines()):
+                continue
+        return candidate
+    suffix = "（需要 drawtext 滤镜）" if name == "ffmpeg" else ""
+    raise ValueError(f"当前环境缺少 {name}{suffix}。")
 
 
 def resolve_optional(name: str, value: str | None = None) -> str | None:
@@ -77,43 +86,96 @@ def build_review(
     output_dir: Path,
     *,
     target_duration: int | float | None = None,
+    profile: str = "fast",
 ) -> dict[str, Any]:
-    original = analyze_video(ffmpeg, ffprobe, benchmark)
-    generated = analyze_video(ffmpeg, ffprobe, candidate)
-    source_duration = float(original["media"]["duration"])
+    """Build a non-blocking quality report.
+
+    fast (default): ffprobe/ffmpeg media metadata only. No low-res visual scan and
+    no aligned comparison sheet. This is the normal production path.
+    full: preserve the legacy visual scan + aligned comparison sheet for an
+    explicit deep review request.
+    """
+    profile = str(profile or "fast").strip().lower()
+    if profile not in {"fast", "full"}:
+        raise ValueError("quality profile 必须是 fast 或 full。")
+
+    if profile == "full":
+        original = analyze_video(ffmpeg, ffprobe, benchmark)
+        generated = analyze_video(ffmpeg, ffprobe, candidate)
+        original_media = original["media"]
+        generated_media = generated["media"]
+    else:
+        # Reuse the lightweight media probe from benchmark_analysis. This avoids
+        # scanning both videos frame-by-frame on every successful generation.
+        try:
+            from scripts.benchmark_analysis import probe as probe_media
+        except ModuleNotFoundError:
+            from benchmark_analysis import probe as probe_media
+        original_media = probe_media(ffprobe, benchmark, ffmpeg)
+        generated_media = probe_media(ffprobe, candidate, ffmpeg)
+        original = {"media": original_media}
+        generated = {"media": generated_media}
+
+    source_duration = float(original_media["duration"])
     target = float(target_duration) if target_duration is not None else source_duration
     if target <= 0 or target > source_duration + .5:
         raise ValueError("质检目标时长必须大于0且不得超过原片可用范围。")
-    duration = min(target, source_duration, float(generated["media"]["duration"]))
-    sheet = output_dir / "aligned-comparison.jpg"
-    comparison_sheet(ffmpeg, benchmark, candidate, duration, sheet)
-    actual = float(generated["media"]["duration"])
+    duration = min(target, source_duration, float(generated_media["duration"]))
+    actual = float(generated_media["duration"])
     tolerance = max(.25, target * .03)
     technical_failures: list[str] = []
     if abs(target - actual) > tolerance:
         technical_failures.append("duration_out_of_tolerance")
-    if original["media"]["width"] * generated["media"]["height"] != original["media"]["height"] * generated["media"]["width"]:
+    if original_media["width"] * generated_media["height"] != original_media["height"] * generated_media["width"]:
         technical_failures.append("aspect_ratio_mismatch")
-    if not generated["media"]["hasAudio"]:
+    if original_media["hasAudio"] and not generated_media["hasAudio"]:
         technical_failures.append("missing_audio")
-    result = {
-        "status": "needs_visual_review",
-        "qualityProfile": "strict",
+
+    sheet: Path | None = None
+    pacing: dict[str, Any]
+    if profile == "full":
+        sheet = output_dir / "aligned-comparison.jpg"
+        comparison_sheet(ffmpeg, benchmark, candidate, duration, sheet)
+        original_cuts = [t for t in original.get("candidateCuts", []) if t < target]
+        generated_cuts = [t for t in generated.get("candidateCuts", []) if t < duration]
+        ratio = len(generated_cuts) / len(original_cuts) if original_cuts else None
+        pacing = {
+            "status": "reviewed",
+            "sourceCandidateCuts": len(original_cuts),
+            "candidateCuts": len(generated_cuts),
+            "retentionRatio": ratio,
+            "warnings": ["pacing_collapse_requires_review"] if ratio is not None and ratio < .8 else [],
+            "meaning": "候选数量差异仅提示复核，不证明真实丢镜头",
+        }
+    else:
+        pacing = {
+            "status": "not_scanned_fast_profile",
+            "warnings": [],
+            "meaning": "默认快速质检仅检查媒体技术指标；需要镜头节奏对齐时显式运行full模式。",
+        }
+
+    return {
+        "status": "reported",
+        "qualityProfile": profile,
         "threshold": 85,
         "benchmark": original,
         "candidate": generated,
         "targetDuration": target,
         "replicationWindow": {"start": 0, "end": target},
         "technical": {"passed": not technical_failures, "failures": technical_failures, "durationTolerance": tolerance},
-        "comparisonSheet": str(sheet),
+        "comparisonSheet": str(sheet) if sheet else None,
         "weights": WEIGHTS,
         "scores": {},
         "totalScore": None,
         "hardFailures": technical_failures,
         "passed": False,
+        "technicalPassed": not technical_failures,
+        "semanticStatus": "not_reviewed",
+        "pacing": pacing,
+        "deliveryBlocked": False,
+        "requiresVisualReview": False,
         "mayAutoRegenerate": False,
     }
-    return result
 
 
 def finalize(report: dict[str, Any], assessment: dict[str, Any]) -> dict[str, Any]:
@@ -133,6 +195,8 @@ def finalize(report: dict[str, Any], assessment: dict[str, Any]) -> dict[str, An
         "findings": assessment.get("findings", []),
         "recommendedRepairLayer": assessment.get("recommendedRepairLayer", "none" if total >= 85 and not hard else "step4"),
         "requiresUserApprovalForNewCandidate": not (total >= 85 and not hard),
+        "deliveryBlocked": False,
+        "requiresVisualReview": False,
         "mayAutoRegenerate": False,
     })
     return report
@@ -148,6 +212,7 @@ def main() -> int:
     analyze.add_argument("--ffmpeg")
     analyze.add_argument("--ffprobe")
     analyze.add_argument("--target-duration", type=float)
+    analyze.add_argument("--profile", choices=("fast", "full"), default="fast")
     score = sub.add_parser("score")
     score.add_argument("--report", required=True)
     score.add_argument("--assessment", required=True)
@@ -160,7 +225,7 @@ def main() -> int:
             result = build_review(
                 resolve("ffmpeg", args.ffmpeg), resolve_optional("ffprobe", args.ffprobe),
                 Path(args.benchmark).expanduser().resolve(), Path(args.candidate).expanduser().resolve(),
-                output_dir, target_duration=args.target_duration,
+                output_dir, target_duration=args.target_duration, profile=args.profile,
             )
             output = output_dir / "quality-report.json"
         else:

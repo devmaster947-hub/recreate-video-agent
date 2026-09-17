@@ -1,4 +1,4 @@
 interface:
-  display_name: "recreate-video-agent v4.3"
-  short_description: "分段真实帧与服务端核心工作流驱动的视频复刻"
-  default_prompt: "Use $recreate-video-agent to recreate this product video with locked segmented storyboards, server-side prompt generation, and quality review."
+  display_name: "复刻爆款视频"
+  short_description: "拆解对标视频，替换商品和达人并生成成片"
+  default_prompt: "Use $recreate-video-agent to analyze the authorized benchmark through RecreateVideoPromptV3 only, use the agent-native image generation/editing capability for all image work, and select video generation in the fixed order LibTV, Xiaoyunque CLI, then Dreamina CLI."

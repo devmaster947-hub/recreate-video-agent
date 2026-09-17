@@ -1,140 +1,160 @@
 ---
 name: recreate-video-agent
-description: 通过统一《复刻要求确认单》选择启动配置，使用灵智工坊CLI并行生成替换故事板与分段视频，经用户检查故事板和确认视频提示词后，高保真复刻 TikTok、抖音等产品视频；质检失败后生成可确认的通用技能优化方案。不用于从文字重做 Storyboard 或自由创作 Hook。
+description: 使用灵智工坊CLI调用RecreateVideoPromptV3拆解原视频；图片生成与编辑使用智能体原生能力，视频生成按LibTV、小云雀、即梦CLI的固定顺序自动选择。
+license: Apache-2.0
+metadata:
+  skillhub:
+    slug: recreate-video-agent
+    version: 1.0.0
+    displayName: 复刻爆款视频
+    summary: 拆解爆款短视频，替换商品与达人后生成新的分镜、视频提示词和成片。
+    tags:
+      - 视频复刻
+      - 爆款视频
+      - 电商广告
+      - AI视频
+    homepage: https://github.com/devmaster947-hub/recreate-video-agent
 ---
 
-# recreate-video-agent v4.3
+# recreate-video-agent V5.1 Identity Bindings
 
-## 执行效率与授权交互
+## 工具边界（全流程最高优先级）
 
-- 新任务的本地准备与Storyboard提交以10分钟为交互上限：目标是3分钟内完成分析与原板、5分钟内完成区域预览、最迟在第6分钟并行提交图片任务。外部服务未在剩余时间内完成时，保留原任务ID并返回`processing`，不阻塞超过10分钟、不重复提交。这是交互时间上限，不虚假保证外部生成已完成。
-- “只换包装/产品，其他不变”默认进入快速路径：一次查看全时间轴和全部原板，只放大真正含替换目标且边界不清的格；不对无包装的产品本体、购物袋、展示盘或空容器建立替换区域。
-- 本轮用户直接要求修改本技能时，该请求即授权所要求的技能修改；不要套用Step 5质检失败后自动提案的额外确认门。技能修改不授权上传素材或生成媒体。
-- 已读且未变化的说明、已检查的图片和已完成的分析直接复用。恢复时只读取manifest、当前步骤所需资料与变化字段；不要每轮重新通读整个技能或脚本源码。正常调用先用命令帮助和已有示例，报错时再定位实现。
-- 独立的本地读取、技术检查、候选帧提取按批并行；先总览真实时间轴，只放大不清楚的关键格。元数据纠正不改变时间戳或画布时只更新记录，不重新解码视频或重画原板。
-- Step 2使用批量准备入口，把紧凑的逐格对象轮廓一次转换为Map、蒙版预览和jobs；不由模型反复展开整份JSON。预览必须查看，但不变的预览可复用；只修正有证据的错误格。仍保留逐格遮挡、区域外像素验证、原任务ID恢复和最终视觉检查。
-- 区域图一次写入、一次生成所有蒙版预览，一次视觉检查所有预览；最多允许1轮有证据的本地蒙版修正。修正不改变已选帧时，禁止重抽帧、重登记整份metadata或重画原板。
-- 上传/积分授权按[启动与授权交互](references/start_confirmation_format.md)明确服务名称、素材和操作，用交互选项“1. 同意 / 2. 不同意”。同意仅覆盖该问题列出的范围；预选项、等待超时和未回复都不是授权。明确授权后在相同范围内不重复追问；不承诺绕过系统审批。Step 3本地校验完成后最多6路并行上传原视频与两组Storyboard；缓存锁只保护读写，不覆盖网络传输，失败恢复只补缺失上传。
+- 灵智工坊CLI只允许用于`RecreateVideoPromptV3`的原视频语义拆解与提示词蓝图返回，不得用它生成、编辑、替换或重绘图片，也不得用它生成或重生成视频。
+- 任何图片生成或编辑，包括商品图、达人图、身份图、Storyboard去字、人物/商品替换与整板重绘，只使用当前智能体的原生生图/图片编辑能力。
+- 视频生成阶段必须依次检测本机`libtv`、小云雀CLI和即梦CLI，固定优先级为`libtv_cli → xiaoyunque_cli → dreamina_cli`。选中第一个存在且通过基础可用性检查的CLI后立即用它执行已授权的首次生成，不再要求用户手动选渠道。
+- 使用LibTV时必须完整读取已安装的`libtv-cli` Skill，并以`libtv --help`及子命令`--help`为当前接口事实来源；不猜测参数、模型ID或私有HTTP地址。小云雀和即梦通过Skill内置的本地CLI适配器调用。
+- 视频CLI预检必须按优先级短路：一旦发现可用LibTV，立即返回其绝对可执行路径并跳过小云雀、即梦、MCP资源枚举、插件市场搜索和网页探测。`libtv`不在`PATH`时必须检查官方默认安装位`~/.libtv/libtv`（Windows为`~/.libtv/libtv.exe`）；同一任务后续复用预检返回路径，不重新发现连接。
+- 三家CLI都未检测到时，不安装、不调用其他平台。必须以友好方式同时告知用户两种后续方案：安装LibTV、小云雀或即梦CLI；或复制已展示的Prompt并与指定参考图一起到其他工具生成。手动交付必须按Segment列出每张实际所需图片的角色和可点击绝对路径，不能只说“请带参考图”。
+- 后续章节或参考文件如与本边界冲突，以本节为准。
 
-正式流程固定为五步：
+## 0. 灵智 API Key 按需门禁（仅在首次服务端拆解前）
 
-1. 按模型时长限制生成每段一张真实帧3×3 Storyboard。
-2. 可选地通过灵智工坊CLI并行编辑完整Storyboard，再由用户检查确认。
-3. 把对标视频、完整用户配置、产品/达人信息及各自图片、成对的`rawStoryboards`/`targetStoryboards`交给灵智工坊CLI“复刻爆款提示词v2”，由工作流完成Gemini拆解与GPT重构。
-4. 当前Codex校验、登记并完整展示工作流返回的Video Prompt。
-5. 通过灵智工坊CLI并行生成全部Segment视频、质检与交付。
-
-启动前必须通过统一《复刻要求确认单》完成一次启动确认。该确认在同一个交互步骤中收集产品、达人、视频模型、复刻时长、目标国家/语言和其他配置，同时授权Step 2所需的灵智图片生成、Step 3所需的原视频上传及流程执行到Step 4。存在替换Storyboard时，必须展示全部最终Storyboard并取得“确认故事板”后继续；Step 4完成后必须展示完整视频提示词并取得“确认生成”，才可进入付费Step 5。除这两个确认门外，不加入其他常规确认。新任务默认上传产品图、沿用对标视频达人、使用`Seedance 2 Fast`、复刻时长与原视频一致、目标国家/语言与原视频一致，其他复刻要求为“无”；图片和视频生成provider默认`lingzhi_cli`，原比例、720p、`strict`质量档和高保真模式作为内部固定默认值执行，不在确认单中展示。事实分工固定为：最终Storyboard和anchors负责静态视觉与实体位置，工作流内Gemini基于原视频和rawStoryboard拆解动态与声音，GPT基于blueprint、targetStoryboard与产品/达人brief重构提示词；产品/达人图只锁定身份。Codex负责本地预检、展示和质量判断。
-
-## 启动前确认门
-
-本节“确认开始”也接受用户在已明确列出配置、上传目的地、素材和费用的启动交互中选择“1. 同意”；只针对同一启动问题，不把其他问题的同意当作启动或视频生成确认。
-
-从对话和附件提取已提供信息后，首次响应必须直接展示统一《复刻要求确认单》，不得先单独询问产品或达人。用户已经在当前请求中明确表达的选择直接预填；未明确的项目直接采用确认单中的默认值，不显示“待选择”。
-
-展示前完整读取 [references/start_confirmation_format.md](references/start_confirmation_format.md)，使用其中的单表卡片和固定操作区。只把示例值替换为当前任务的真实文件名、已选配置和素材状态。确认单不得展示输出规格、复刻模式、必须保留项、禁止项、候选产品图、候选达人图或单独的产品卖点字段。用户提供的产品卖点或希望相对对标视频修改的内容，原样记入“其他复刻要求”；没有时显示“无”。
-
-默认产品选项是“上传产品图”。启动前必须至少收到一张产品参考图；若用户未上传，只要求其补充产品图，或明确改选“使用对标视频中的原产品”。默认达人选项是“沿用对标视频达人”；选择“替换为新达人”时，启动前必须收到达人参考图。达人附件本身不改变默认选择，除非用户明确选择替换。不得自动生成新达人。
-
-自定义时长必须填写正整数秒，含义固定为复刻原视频`0～N秒`，不得压缩整片，也不得超过原片实际时长。原片不足10秒时，“仅开场10秒”等同复刻完整原片。选择“自定义语言”时必须给出具体语言；未给出时只补问语言，不得启动。
-
-确认单末尾使用 [references/start_confirmation_format.md](references/start_confirmation_format.md) 的“下一步”操作区，要求用户用一条回复完成选择和授权。接受全部默认项时，要求用户附上至少一张产品图并回复“确认开始”；改用原产品时，推荐格式为：
-
-> 产品=原产品；确认开始
-
-用户也可以在同一条回复中覆盖任意默认项，例如：
-
-> 产品=上传；达人=替换；模型=Seedance 2；时长=10秒；语言=英语；其他复刻要求=<原文>；确认开始
-
-“产品=上传/原产品”分别对应“上传产品图/使用对标视频中的原产品”；“达人=替换/默认”分别对应“替换为新达人/沿用对标视频达人”；“模型=默认”表示`Seedance 2 Fast`；“时长=默认”表示与原视频一致；“语言=默认”表示与原视频一致。用户此前已经明确表达且在最新版确认单中预填的配置无需重复，只需满足所选素材条件并明确回复“确认开始”。
-
-只有在用户看到最新版统一确认单、所有自定义值完整、所选上传或替换项具备对应参考图，并明确回复“确认开始”后才可执行。若默认上传产品图但图片缺失、替换达人但图片缺失，或自定义语言/时长缺少具体值，保留其他已选配置，只补问缺失内容并要求再次确认，不得初始化任务、分析视频或上传素材。
-
-复刻时长与原视频一致或原片不足10秒时，源时长不是整数秒不得增加二次时长确认；启动后由技术分析自动采用最接近的合法整数秒并继续。分析结果必须记录`durationMode`、`requestedDuration`、原始时长、目标时长、`replicationWindow`和调整量。自定义时长超过原片、或复刻总时长短于所选模型最短时长时必须停止，不得静默延长。任何用户主动配置改变都会使旧确认失效；自动时长归一化不视为配置改变，无需再次确认。
-
-确认前只能整理输入和检查附件路径；不得初始化任务、分析视频、抽帧、编辑图片、上传素材或调用任何生成服务。确认后运行：
+复刻任务开始时不得检查、索取或提醒用户配置灵智工坊 API Key，也不得把 Key、登录或授权状态加入启动确认单。先正常读取原视频、展示启动确认、初始化manifest并完成本地技术分析。只有流程即将首次执行第2节、调用`RecreateVideoPromptV3`进行服务端拆解时，才运行下面的零消耗远端鉴权预检：
 
 ```text
-python3 scripts/generation_manifest.py init --task-id <taskId> --output-root <output-root> --video-model <videoModel> --duration-mode <source|opening_10|custom> [--target-duration <customSeconds>] [--target-country <country>] [--target-language <language>] [--custom-requirement <text>]
-python3 scripts/benchmark_analysis.py --video <benchmark> --model <videoModel> --duration-mode <source|opening_10|custom> [--target-duration <customSeconds>] --output <task>/analysis/benchmark-analysis.json
-python3 scripts/generation_manifest.py set-benchmark-analysis --manifest <manifest> --file <task>/analysis/benchmark-analysis.json
+python3 scripts/lingzhi_key_preflight.py
 ```
 
-有产品图时按需读取 [references/product_brief_generation.md](references/product_brief_generation.md)，不得虚构卖点、功能或功效。
+预检会从`LZSTUDIO_API_KEY`、`RECREATE_VIDEO_API_KEY`或`~/.recreate-video/config.json`的`apiKey`读取非空 Key，并调用灵智工坊`account --credits`完成真实服务端鉴权。只有命令返回`{"ok": true, "authenticated": true}`才算通过；“本地存在非空 Key”、CLI 可启动或未经证实的网络错误都不算通过。
 
-## Step 1：分段真实帧 Storyboard
+- 未配置 Key 时，只在这个按需检查节点提醒用户：“接下来需要调用灵智工坊拆解原视频，请前往 https://www.lingzhiai.com.cn/ 获取 API Key。”不得把这条提醒提前到任务开始、素材检查或启动确认阶段。
+- 远端预检因 Key 无效、权限不足、网络失败、CLI 不可用等原因未通过时，停止即将进行的灵智拆解，保留已经完成的本地分析和manifest；只展示脱敏原因，请用户检查或更换 Key 后重试。
+- 预检通过前不得上传原视频或提交灵智任务。每个新任务在首次灵智调用前都必须完成一次预检，不得因为之前任务曾通过而跳过；预检之前的本地读取、确认、初始化与技术分析不受此门禁限制。
+- 如果用户提供 Key，只将其用于本地配置和鉴权；不在后续聊天、命令输出、日志、manifest或交付物中回显完整 Key。
+- 本机已配置 Key 时不提示、不重复索取，直接在按需检查节点执行远端预检。预检只证明当前 Key 可被灵智服务鉴权，不把余额数值写入日志、manifest或交付物。
 
-完整读取 [references/storyboard_extraction.md](references/storyboard_extraction.md)。只分析`replicationWindow`覆盖的原视频区间和其中的真实切镜，再按模型能力确定最少Segment；边界优先吸附到合法范围内的真实切镜，确定后不得漂移。
+## 职责与授权
 
-每段必须有连续的`globalStart/globalEnd`和正好9个真实anchors；第一格为段起点且是`hard`，首段事件为`first_frame`，后续段为边界切镜或`continuity_start`。硬锚点保留切镜、Hook、产品首次出现、关键状态、Before/After、Proof和CTA；软锚点覆盖动作开始/过程/结束；`context`只补时间覆盖。
+用户要求优先。使用最少Segment，每段唯一rawStoryboard。当前Planner V2策略输出9个anchors；Storyboard布局由客户端根据anchors数量派生，不作为服务端协议字段。原视频决定动态和声音，target Storyboard决定替换后的静态视觉。新任务默认`storyboardValidationMode=fast`；只有用户明确说“严格复刻”或要求区域锁定时才使用`strict`。旧Manifest缺少该字段时按`strict`处理。不要将用户人物微调要求推广为所有任务的默认要求。
+
+沿用 references/start_confirmation_format.md 的一次启动确认，字段为产品、达人、模型、时长、国家、语言及其他要求。确认问题必须提供数字选项，让用户只回复`1`即可按当前配置开始，回复`2`则进入配置修改。确认开始授权本轮原视频上传、服务端拆解最多两次提交（首次明确终态失败时自动重试一次）、图片编辑及通过第一个可用视频CLI进行的首次视频生成。除这一次服务端拆解自动重试外，失败或质量不合格不自动授权其他付费重试。默认Seedance 2 Fast、原时长、原国家语言、原人物产品。逻辑模型与时长能力仍由 scripts/model_capabilities.py 决定；LibTV按实时schema解析模型，小云雀和即梦按Skill内精确provider模型ID映射，不猜测模型ID或30秒能力。
+
+图片生成与编辑使用当前智能体原生图片工具；不使用灵智工坊或其他外部图片CLI/API。服务端语义拆解仅通过LZStudio CLI的RecreateVideoPromptV3，保持现有模型路由。客户端不导出音频、不运行ASR、不做TTS或音频参考。服务端密钥严格按第0节延迟到首次灵智拆解前检查：启动阶段不检查、不索取、不提醒；密钥不在后续聊天或交付物中展示。服务端授权错误仅展示既有管理员提示，保留脱敏。
+
+人物ID仍是Prompt语义绑定的硬门禁，但达人参考图按来源和Segment数量决定。绝不把原视频抽取的单帧登记或提交为达人参考图。用户提供达人图时直接使用用户图；用户未提供时，多Segment任务必须用当前智能体原生生图能力生成每位持续人物的无产品多视图，单Segment任务不生成、不提交达人参考图。
+
+## 1. 预检与初始化
+
+在Windows x64上，Skill内置`cli/windows-x64/lzstudio.exe`，`server_video_analysis.py`可直接发现并调用，不要求全局安装。只有用户明确要求安装到系统PATH时，才按 references/windows_lzstudio_cli.md 运行安装脚本。不从网络下载或自动替换内置二进制。
+
+读取原文件时长（最长360秒），确认后运行generation_manifest.py init、benchmark_analysis.py和set-benchmark-analysis。源视频保持不变。技术分析阶段只产生媒体信息与technicalCutCandidates；最终Segment与Storyboard锚点由服务端确定，此时不抽板、不在客户端计算最终分段。原时长模式按视频模型要求取最近整数秒；当整数目标与真实媒体时长差值不超过0.5秒时，这是正常归一化，不得作为异常、阻塞或要求用户确认。
+
+用户选择替换产品时，`init`后必须立即把每张用户产品图登记为独立生成输入，不得只复制到任务目录、写进Prompt或画进Storyboard：
+```text
+python3 scripts/generation_manifest.py set-product-references --manifest <manifest> --image <product-image> [--image <product-image-2>]
+```
+该命令必须把`product.useBenchmarkProduct`设为false并保存`product.productImages`。未完成登记不得进入Storyboard替换；产品图与Storyboard、人物身份图用途不同，生成时三类引用都必须提交。
+
+## 2. Gemini先拆解
+
+完整读取 references/server_video_analysis.md。执行：
+```text
+python3 scripts/server_video_analysis.py --manifest <manifest> --benchmark <video>
+```
+用户明确提供可访问的HTTP(S)原视频直链并要求跳过上传时，仍保留本地原片用于技术分析、Storyboard和成片对齐，但服务端提交改用：
+```text
+python3 scripts/server_video_analysis.py --manifest <manifest> --benchmark <local-video> --benchmark-url <video-url>
+```
+`--benchmark-url`只替换上传步骤，不放宽启动确认、最多两次提交、时间轴校验或失败重试规则。
+只上传原视频；新任务请求携带`plannerVersion=2`（旧任务保留V1），userConfig附technicalCutCandidates、targetDuration、sourceDuration、targetDurationSource和blueprintSchemaVersion=7.0；服务端任务默认每5秒查询一次状态，避免任务已完成仍等待20秒轮询间隔；其中sourceDuration/targetDurationSource仅供服务端Code节点做确定性规划，不注入Gemini Prompt；不传rawStoryboards，不要求预先生成图片。线上需由管理员导入配套v3.2双版本工作流JSON（assets/workflows/replication-v2.json）；本地升级不代表线上启用。
+
+同一manifest排他锁、上传前preparing_submission、每次taskId原子receipt必须保留。首次任务只有在服务端明确返回`failed/failure/error/cancelled/timeout`终态时才自动重提一次；第二次失败立即停止。鉴权/余额异常、CLI异常、客户端轮询超时、未知状态或提交结果不确定均不自动重提。后台session_id继续使用同一执行会话；functions cell与进程session不可混用。无输出/无exit code/无taskId不代表未提交。已有ID只用--resume-task-id恢复最新任务。旧蓝图仍可查看，不自动迁移或额外付费重拆。
+
+## 3. 读取服务端复刻规划
+
+RecreateVideoPromptV3在完成Gemini拆解后，由同一n8n工作流中的纯Code节点生成`replicationPlan`。该节点不调用任何大模型、不增加Token消耗，负责Segment与Storyboard anchors规划。服务端契约从本版起固定为`replicationPlan.schemaVersion=1.0`、新任务`plannerVersion=2`，旧任务兼容`plannerVersion=1`；Planner Engine与Policy分离。客户端不得重新计算、评分或修改规划规则。
+
+执行：
+```text
+python3 scripts/blueprint_timeline.py --manifest <manifest> --output <task>/analysis/segment-anchors.json
+```
+该脚本只做协议适配：校验`replicationPlan`的schema/planner版本，把服务端结果写入既有`segment-anchors.json`兼容路径，并根据anchors数量派生本地Storyboard布局；本地不包含动态规划、切镜/对白停顿评分或keyframe锚点选择算法。
+
+Planner V2沿用V1分段引擎与时长规则：最少Segment、整数秒模型限制、优先靠近真实cut/对白停顿、尽量不切断对白；当前V1 Policy使用9个anchors，优先使用Gemini keyframes并补足时间覆盖。V1内只允许兼容性参数调优；改变已发布模型的合法时长范围、anchor数量或协议字段必须新增Planner版本，不能覆盖V1。真实媒体时长与整数目标差异不超过0.5秒时，服务端钳制原片抽帧到`sourceDuration-0.04s`以内；超过0.5秒则规划失败。服务端返回`blueprintWarnings`和`unresolvedCuts`仅供复核，不触发再次付费拆解。
+
+## 4. 生成唯一rawStoryboard
+
+执行storyboard.py，传--video、--timestamps-file、--output-dir、--model。当前Planner V2返回9个anchors，因此每段生成一张3×3 Storyboard；客户端不读取服务端layout字段，而是从anchors数量派生布局。抽帧成功、9格齐全、时间戳位于Segment窗口内由程序硬校验；不再为了模糊、闭眼、遮挡等逐阶段单独调用视觉质检。起点保持Segment开始状态。因最近整数秒取整而多出的尾部只延续或定格原片最后可观察状态，不得凭空新增镜头、动作、对白或剧情；这类不超过0.5秒的尾部补齐静默处理，无需向用户报警。
+
+抽板后、首次图片编辑前，完整读取 references/entity_bindings.md。在原有分镜理解步骤对照原始九格与蓝图核对关键人物/产品，仅有具体疑问时补看相关原片帧；保存来源人物/产品到目标的 replacementBindings。不能把说话人当成人物清单，也不能把所有人物替换为同一达人。此来源核对不增加编辑后或视频生成后质检。
+
+按 references/storyboard_editing.md 清理对白字幕、双语字幕及手机UI，仅保留确有剧情作用的金额特效。使用当前智能体原生图像生成/编辑能力把去字和产品/达人替换尽量合并到一次整板编辑。快速模式不做Storyboard视觉质检或自动重做；严格模式仍执行最终视觉质检。抽帧结果为处理暂存，最终板登记为storyboards.original/edited；不建立额外故事板类别。自动重试不默认授权。
+
+清理完成后用generation_manifest.py add-storyboards-from-metadata登记。图片替换阶段沿用这张板，按KEEP/CHANGE/AUTO-DESIGN清单只修改用户指定人物或产品。人物在各段适度改形象但保持同一身份设定（仅用户提出此要求时）。
+
+快速模式只生成一次整板候选图；不建Replacement Map，不运行`validate-map`、`lock-merge`、mask预览或视觉质检，不因残留、畸形或人物漂移自动重做。立即运行：
+```text
+python3 scripts/storyboard_cells.py fast-prepare --original <rawStoryboard> --edited <candidate> --output <finalStoryboard>
+```
+`fast-prepare`只检查文件可读、候选画布比例偏移不超过15%、3×3网格可识别，并恢复原始时间标签和输出尺寸。以`method=whole-board-fast-v1`、`validationLevel=mechanical`登记edited；`replacementVerified`只表示文件、SHA、布局和引用完整，不表示视觉质量合格。
+
+严格模式才建立`mergeMode=object-regions-v1` Replacement Map，运行`validate-map`和`lock-merge`，要求`protectedPixelsRestored=true`、`outsideMaskChangedPixels=0`，并完成一次最终视觉质检。区域冲突时停止，不扩大mask绕过保护。
+
+登记edited时复用同一9个anchors，布局固定3×3。对每格实际可见人物建立身份清单并把全部ID写回anchors；原视频画面只能用于人物理解和生成多视图时的内部视觉依据，不得把任何原片单帧复制、改名或直接登记为Creator图。
+
+达人参考图策略在最终Segment数量锁定、来源映射确定后执行；需要人物图时先准备目标身份，再编辑相关分镜：
+
+- 用户为某达人提供图片：原样登记为`user_provided`并在相关Segment提交；不得再用原片帧补充。
+- 用户未提供且只有1个Segment：不生成、不登记、不提交达人图；creatorIds只用于Prompt中描述人物。
+- 用户未提供且有多个Segment：用当前智能体原生生图能力为每位跨段或需保持一致的人物生成一张干净多视图。整张图只需包含同一人物的正面、一个侧面和背面，不再重复生成左右两个侧面；三个视图的身份、发型、服装必须一致。使用纯净中性背景，不得出现产品、道具、场景、文字、水印或原视频画面。视觉检查确认无产品后才登记。
+
+登记命令：
+```text
+python3 scripts/generation_manifest.py add-creator --manifest <manifest> --creator-id <id> --image <user-image> --source-type user_provided
+python3 scripts/generation_manifest.py add-creator --manifest <manifest> --creator-id <id> --image <generated-sheet> --source-type generated_multiview --view front --view side_profile --view back --product-free-verified
+```
+`sourceType`缺失、原片抽帧来源、生成多视图角度不全或未通过无产品检查时，Prompt交接与视频生成都必须阻断。
+
+## 5. Prompt与生成
+
+执行prepare_prompt_handoff.py，直接复用最终板，不重绘或拆格生成。完整读取 references/local_prompt_pipeline.md，当前智能体一次生成最终Prompt。不得固定3～5宏观阶段；完整覆盖本段shots、cuts、beats及utterances，包括未进入Storyboard的镜头。人物/产品集合来自本段全部镜头，再经replacementBindings映射；九格实际可见人物只是其中的子集。
+
+Prompt的指令、镜头、动作、画面、运镜和声音说明必须使用中文；对白使用用户指定的目标语言，默认沿用原语言。指定语言与原片不同时，在最终Prompt阶段翻译并保留utteranceId/lineId关联；原片蓝图对白不改写。不增加语言校验。
+
+保存local-video-prompts.json并用set-prompts登记（沿用该文件名以兼容现有Manifest）。登记后必须完整读取 references/prompt_display_format.md，运行`export_prompt_texts.py`导出逐段纯文本备份，并在同一条聊天消息中按“概览 + Segment卡片 + 独立text代码块”展示全部Prompt。Prompt正文必须从已登记数据逐字复制，不改写、不摘要、不折叠；代码块便于一键复制，纯文本链接只作辅助，不得代替聊天中的完整正文。该展示不新增中间确认门；已授权的首次生成继续执行。
+
+完整读取 references/generation_rules.md，然后执行：
 
 ```text
-python3 scripts/storyboard.py --video <benchmark> --timestamps-file <segment-anchors.json> --analysis-file <task>/analysis/benchmark-analysis.json --output-dir <task>/storyboards/original
+python3 scripts/video_cli_preflight.py --manifest <manifest>
 ```
 
-输出固定为`segment-01-storyboard-3x3.png`等文件，并把metadata登记到manifest。所有画格必须直接来自原视频，禁止AI生成或重绘。
+严格按返回的`selected`处理：
 
-## Step 2：可选完整故事板局部替换
+1. `libtv_cli`：完整读取`libtv-cli` Skill，执行只读账户、项目、模型schema与参考图能力检查。首次生成统一运行`python3 scripts/libtv_batch_generate.py --manifest <manifest> --workspace-id <id> --generation-approved [--vip-download]`；已有画布时可传`--project-uuid <uuid>`代替workspace。该命令一次完成参考图去重上传、nodeKey回填、按顺序连接最终Storyboard/产品图/人物图、实际UUID占位符写入、全Segment并行运行及下载。禁止再手工逐节点编排。`libtv node ... --run`会自行等待终态；脚本不额外轮询，任务不确定时保留状态并禁止自动重提。仅需检查时传`--plan-only`，不创建画布、不上传、不提交付费任务。
+2. `xiaoyunque_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider xiaoyunque_cli --generation-approved`。
+3. `dreamina_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider dreamina_cli --generation-approved`。
+4. `null`：运行`python3 scripts/prepare_manual_video_handoff.py --manifest <manifest>`，再按 references/generation_rules.md 的“无CLI手动交付”模板回复。必须列出三种可安装CLI，并按Segment明确列出Storyboard、产品图、人物身份图的实际文件；不得只交付一句泛化的“Prompt和参考图已就绪”。
 
-完整读取 [references/storyboard_editing.md](references/storyboard_editing.md)。
+每个Segment只提交一次并立即保存返回的画布、节点或任务标识；之后只恢复同一任务。已开始提交后，失败、未知状态、超时、登录或余额异常都不得自动切换到下一家CLI，避免重复付费提交。首次提交必须处于本轮启动确认的授权内；任何重生成均需用户重新授权。灵智工坊不得用于视频生成。
 
-- 产品和达人都沿用时，不调用图片编辑，把原Storyboard直接登记为最终Storyboard。
-- 替换任一身份时，从9个原始anchors建立完整Map，原样保留存在、数量、可见范围及interactionState。新任务使用`object-regions-v1`：逐格标注产品/达人允许变化的多边形，以及前景手指、道具等protect区域；先查看本地蒙版预览。
-- 用`scripts/run_storyboard_edits.py`并行提交全部Segment的完整3×3 Image Edit，每张默认最多一次生成。参考图只锁定身份；原始板唯一决定构图、数量、状态和接触关系。画布比例按含标签的原板尺寸计算，只补外边，默认2K，不能套用视频比例。
-- `run_storyboard_edits.py`默认8秒轮询、最多360秒并行等待；超时返回`processing`并保留任务ID，不视为生成失败。使用`--submit-only`可在全部新任务ID落盘后立即返回；恢复时重运同一命令但不需再传授权标志。
-- 返回后检查画布比例并恢复为原Storyboard尺寸；逐格去除生成图自带的时间条，只从original恢复时间标签和格线；完整Image Edit结果作为新的最终Storyboard，不再按对象区域蒙版进行像素拼接，也不因非目标区域漂移指标中止。
-- Codex查看原板/生成板/最终板对比，核对身份、数量、可见范围、状态、动作阶段、遮挡和人物一致性。明显错误先指出并处理，不自动追加生成。不使用旧replacement audit或validate-plan作为通过依据。
-- 展示全部原板与新的最终板供用户检查，用户明确确认后才登记。新模式`replacementVerified=true`必须同时满足Image Edit完成、Map有效、画布和标签恢复成功、证据哈希一致、用户确认的成品哈希有效。
-- 已有ID仅恢复查询；已完成且未改变的产物保留确认。旧Map可读和恢复旧任务，不允许新提交；升级不能重置已有任务ID或触发重复扣费。
+付费提交前必须检查`referenceAudit.segments[].orderedFiles`：顺序为最终Storyboard、独立产品参考图、该段人物身份图。只要Replacement Map含`replaceProduct=true`，产品图必须同时出现在`registeredProductImages`、`productImages`和`orderedFiles`中；任一处缺失、文件为空，或Manifest仍标记沿用原产品，都必须阻止提交。不得因为Storyboard里已经画出了新产品而省略独立产品图。
 
-数据流固定为：`原始anchors → 对象区域Map与预览 → 加外边原板 → 并行整板Image Edit → 画布与标签恢复 → 完整前后对比检查 → 用户确认 → generation storyboard`。对象区域Map用于约束生成提示词与检查重点，不作为返回图的裁切蒙版。用户确认新的完整Storyboard后运行`generation_manifest.py confirm-storyboards --user-confirmed`并直接继续；通过后按 [references/segment_storyboards.md](references/segment_storyboards.md) 生成段内时间Storyboard。只改时间标签，保留逐格原始时间、实体状态和接触信息。
-跨产品结构不匹配时使用营销功能等价的状态映射，保留奖励次数、Proof密度和CTA位置；删除新产品无法成立的动作，不虚构功能。
+## 6. 核验与交付
 
-## Step 3：灵智CLI“复刻爆款提示词v2”
+默认使用**快速技术质检**：只读取原片与成片的媒体信息，检查时长、画面比例、音轨存在性和文件可读取性；不重新做低清视觉扫描，不生成10组原片/成片对齐图。这样不会影响已生成视频，只减少生成后的等待。
 
-完整读取 [references/gemini_video_analysis.md](references/gemini_video_analysis.md)。使用`scripts/gemini_cli_analysis.py`（保留历史文件名）调用`recreate-video-prompt submit/fetch`。Gemini拆解与GPT重构都在工作流内完成，不再调用“任意任务”，不传`--workflow-id`或`--input`。
+只有用户明确要求“深度质检/复刻效果评估/对齐图”时，才运行full质量模式（本地CLI路径可传`--full-quality-review`；`quality_review.py analyze`可传`--profile full`），生成切镜扫描与aligned-comparison。保留原视频路径供此时使用。technicalPassed仅代表技术指标，不能声称语义复刻成功；对白串人、乱码、反应/反转遗漏须如实报告。失败报告不隐藏已生成成片，不自动重生成。
 
-提交内容为：对标视频、`productBrief`（含`productImages`）、`creatorBrief`（含`creatorImages`）和完整`userConfig`。`userConfig`必须包含`model`、`newVideoDuration`、`targetCountry`、`targetLanguage`、`otherRequirements`、`rawStoryboards`和`targetStoryboards`，全部从已确认的manifest真实值确定，不得漏传或另行改写。两组Storyboard始终为数组，即使只有一张也不改类型；每个数组元素用`file`包装HTTP媒体对象，并在同一元素保留Segment ID、Storyboard ID和全局时间窗。两组按Segment顺序一一配对。raw来自原始真实帧板；target来自已经确认的最终板的段内时间版本，与Step 5使用的板一致。未替换身份时target复用原画面，仅允许时间标签变化。
-
-所有媒体经CLI上传后使用HTTP(S)地址。任一原板、目标板或已选择的身份图缺失/上传失败，提交前停止，不得漏图继续。模型、时长、国家、语言和其他要求必须按确认单与manifest写进`userConfig`；产品与达人约束分别保留在对应brief。anchors、Map、蒙版、分析提示词和已有blueprint留在本地，不另行加入此次CLI请求；Storyboard条目的ID和时间窗是配对元数据。服务输出若与本地确认配置冲突，在Step 4报告，不能静默改变用户配置。
-
-```text
-python3 scripts/gemini_cli_analysis.py --manifest <manifest> --benchmark <benchmark-video> [--product-brief <product-brief.json>] [--creator-brief <creator-brief.json>]
-python3 scripts/gemini_cli_analysis.py --manifest <manifest> --resume-task-id <task-id>
-```
-
-取得ID后先落盘，等待中断只用同一ID恢复fetch，不重复提交。工作流必须返回非空`videoPrompts.segments`，同时保留原始响应和可用的blueprint；服务没有返回提示词时报告错误，不能改为本地GPT重构。终态失败保留原始响应、任务ID和错误；不得把“缺少必要参考职责或生成约束”解释为自动重提许可。
-
-## Step 4：校验并展示工作流 Video Prompt
-
-完整读取 [references/video_prompt_generation.md](references/video_prompt_generation.md)。以工作流返回的`videoPrompts`为提示词来源；本地只做格式适配、引用和时间校验、必要的质量登记，不重新执行Gemini→GPT。每个Segment严格沿用Step 1窗口和一张`storyboards.generation`。无对应产品/达人画面时不附加该身份图。
-
-先保留原始返回，再验证`segments`，保存前通过`scripts/prompt_preflight.py`。`adaptationPlan`和`qualitySpec`不是视频生成输入，仅在服务实际返回时作为可选元数据保存，缺失不阻塞。服务响应的字段命名可做确定性适配。只有缺少固定参考职责或最小生成约束时，`set-prompts`按[固定约束补齐与失败恢复](references/prompt_constraint_repair.md)执行一次确定性补齐：保留原文、另存修复版和逐段变更记录，再跑完整预检；不调用模型、不重新submit。缺少实质内容、时间不匹配、遗漏用户要求或与目标Storyboard冲突时报告具体差异，不能通过本地重写来掩盖失败。`customRequirement`非空时仍须在返回提示词正文中落实，否则暂停并报告本地要求与工作流输出不一致。
-
-```text
-python3 scripts/generation_manifest.py set-prompts --manifest <manifest> --file <task>/analysis/workflow-video-prompts.json
-```
-
-登记若生成修复版，后续展示和提交以manifest中`videoPrompts.file`为准，并说明补齐项；原始工作流文件仍保留。补齐不表示已完成人工语义/视觉质检，也不授予视频生成确认。
-
-保存并通过预检后，完整读取 [references/prompt_display_format.md](references/prompt_display_format.md)，按其中的“生成概览 → Segment卡片 → 提交确认”顺序展示。必须把每个Segment的标题、时长和完整`prompt`正文逐字展示给用户，不得只给摘要、文件链接或截断内容。聊天展示可增加标题、表格、字段标签和分隔线，但这些导航元素不属于Prompt，不得写回`video-prompts.json`、manifest或提交给视频模型。末尾必须使用该规范的“提交确认”固定操作区，明确要求用户回复“确认生成”。
-
-展示后停止等待。启动阶段的“确认开始”不能替代此处确认。只有用户在看到当前最新版全部Prompt后明确回复“确认生成”，才可进入Step 5；用户修改任何Prompt、Storyboard、产品/达人素材、模型、时长、语言或输出规格后，旧的生成确认立即失效，必须重新展示完整Prompt并再次确认。
-
-## Step 5：生成、质检与交付
-
-只有Step 4生成确认门已通过，才可完整读取 [references/generation_rules.md](references/generation_rules.md) 和 [references/quality_gates.md](references/quality_gates.md) 并提交。参考顺序固定为：本段最终Storyboard → 本段产品身份板/产品图 → 本段显式Creator图。禁止把原视频作为生成参考。
-
-新产品模式必须至少有一张`product.productImages`；兼容读取旧字段`product.images`，新任务只写规范字段。引用审计必须在付费提交前阻止不存在的Storyboard、未完成替换的旧产品Storyboard、错误Creator引用、超出图片上限以及无产品Segment附带产品图。
-
-```text
-python3 scripts/run_generation.py --manifest <manifest> --generation-approved [--segment-id <id> --skip-concat]
-```
-
-用户明确要求先生成部分Segment时，可重复传入`--segment-id`只提交指定段；完整Prompt计划仍须先通过预检。部分生成必须使用`--skip-concat`，不得把缺段候选拼接成完整成片。
-
-默认provider固定为灵智工坊CLI。完整生成时先并行提交所有尚无任务ID的Segment并逐个立即登记任务ID，全部提交完成后再并行轮询和下载；恢复任务只轮询原ID。首次成功生成`candidate-01`。技术质检后由Codex查看对齐图并评分；总分≥85且无硬失败才通过。失败时报告差异、归因、修复建议和服务实际费用，并完整读取 [references/skill_optimization.md](references/skill_optimization.md) 自动形成结构化技能优化方案。只有可跨任务复用且可归因到本技能的问题才能进入修改项；模型、渠道和当前任务特有问题必须列入排除项。用户看到完整方案并明确回复“确认优化 skill”后才可修改本技能，且该确认不授权创建新候选或重新提交。网络或等待错误只能轮询原任务ID，取得ID后不得切换渠道或重复submit。
-
-## 永久禁用项
-
-不得使用`shotContracts`、`renderUnits`、`renderUnitId(s)`、“任意任务”提交复刻提示词、绕过指定CLI直接调用Gemini或GPT、在工作流外重新执行提示词重构、自动Creator生成、根据Video Prompt派生Storyboard、改变3×3固定网格的数量或布局、自动重做Hook、独立营销分析步骤或自动质量重生成。旧4×4任务保留产物和任务ID，需用升级前备份版本恢复，不得强行按九宫格读取或自动重新付费提交。不得修改、覆盖或删除`recreate-video-system-v3.1`。
+本地修改Skill和工作流JSON不代表线上已发布。交付配套导入JSON并注明管理员导入启用后才适用新服务端契约。

@@ -114,22 +114,46 @@ def prepare_benchmark_video(
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
         raise CompressionError("max_bytes 必须是正整数。")
     original_bytes = source.stat().st_size
-    if original_bytes <= max_bytes:
+    normalize_container = source.suffix.lower() != ".mp4"
+    if original_bytes <= max_bytes and not normalize_container:
         return {
             "filePath": str(source),
             "compressed": False,
+            "normalized": False,
             "originalBytes": original_bytes,
             "uploadBytes": original_bytes,
             "maxBytes": max_bytes,
         }
 
     ffmpeg = resolve_ffmpeg(ffmpeg_path)
-    duration = probe_duration(source, ffmpeg, runner=runner)
     directory = (
         Path(output_dir).expanduser().resolve()
         if output_dir is not None
         else Path(tempfile.gettempdir()) / "recreate-video-agent" / "benchmark-uploads"
     )
+    if normalize_container and original_bytes <= max_bytes:
+        normalized = _available_output(source, directory)
+        remux = _run(
+            [
+                str(ffmpeg), "-y", "-i", str(source),
+                "-map", "0:v:0", "-map", "0:a?", "-c", "copy",
+                "-movflags", "+faststart", str(normalized),
+            ],
+            runner=runner,
+        )
+        upload_bytes = normalized.stat().st_size if normalized.is_file() else 0
+        if getattr(remux, "returncode", 1) == 0 and 0 < upload_bytes <= max_bytes:
+            return {
+                "filePath": str(normalized),
+                "compressed": False,
+                "normalized": True,
+                "originalBytes": original_bytes,
+                "uploadBytes": upload_bytes,
+                "maxBytes": max_bytes,
+            }
+        normalized.unlink(missing_ok=True)
+
+    duration = probe_duration(source, ffmpeg, runner=runner)
     output = _available_output(source, directory)
     passlog = output.with_suffix("").with_name(output.stem + "-passlog")
     last_error = "FFmpeg 未生成有效文件。"
@@ -171,6 +195,7 @@ def prepare_benchmark_video(
                 return {
                     "filePath": str(output),
                     "compressed": True,
+                    "normalized": normalize_container,
                     "originalBytes": original_bytes,
                     "uploadBytes": upload_bytes,
                     "maxBytes": max_bytes,
