@@ -70,16 +70,33 @@ class LibTVClient:
     def project_info(self, project_uuid: str) -> dict[str, Any]:
         return self.call("project", project_uuid)  # type: ignore[return-value]
 
+    def create_workspace(self, name: str, description: str = "") -> int:
+        arguments = ["workspace", "create", name]
+        if description:
+            arguments += ["-d", description]
+        result = self.call(*arguments)
+        assert isinstance(result, dict)
+        nested = result.get("workspace") if isinstance(result.get("workspace"), dict) else {}
+        workspace_id = str(
+            result.get("workspaceId") or result.get("id") or result.get("folderId")
+            or nested.get("workspaceId") or nested.get("id") or nested.get("folderId") or ""
+        ).strip()
+        if not workspace_id or not workspace_id.lstrip("-").isdigit():
+            raise LibTVBatchError(f"创建LibTV工作区后未返回workspaceId：{json.dumps(result, ensure_ascii=False)[:200]}")
+        return int(workspace_id)
+
     def create_project(self, name: str, workspace_id: int) -> str:
         result = self.call("project", "create", name, "--workspace", str(workspace_id))
         assert isinstance(result, dict)
         nested = result.get("project") if isinstance(result.get("project"), dict) else {}
+        meta = result.get("projectMeta") if isinstance(result.get("projectMeta"), dict) else {}
         project_uuid = str(
             result.get("uuid") or result.get("projectUuid")
-            or nested.get("uuid") or nested.get("projectUuid") or ""
+            or nested.get("uuid") or nested.get("projectUuid")
+            or meta.get("uuid") or meta.get("projectUuid") or ""
         ).strip()
         if not project_uuid:
-            raise LibTVBatchError("创建LibTV画布后未返回projectUuid。")
+            raise LibTVBatchError(f"创建LibTV画布后未返回projectUuid：{json.dumps(result, ensure_ascii=False)[:200]}")
         return project_uuid
 
     def upload(self, project_uuid: str, name: str, file: str, x: int, y: int) -> str:
@@ -226,11 +243,58 @@ def run_nodes_parallel(
     return completed, errors
 
 
+# manifest 逻辑模型ID → LibTV modelKey → LibTV 展示名（CLI 的 -s 只接受展示名）
+LIBTV_MODEL_DISPLAY_NAMES = {
+    "seedance-2-mini": "Seedance 2.0 Mini",
+    "seedance-2-fast": "Seedance 2.0 Fast VIP",
+    "seedance-2": "Seedance 2.0 VIP",
+    "seedance-2-5": "Seedance 2.5",
+}
+LIBTV_MODEL_KEYS = {
+    "seedance-2-mini": "star-video2-mini",
+    "seedance-2-fast": "star-video2-fast",
+    "seedance-2": "star-video2",
+    "seedance-2-5": "star-video2.5",
+}
+LIBTV_KEY_TO_DISPLAY = {value: LIBTV_MODEL_DISPLAY_NAMES[key] for key, value in LIBTV_MODEL_KEYS.items()}
+
+
 def default_libtv_model(manifest_model: str) -> str:
-    normalized = manifest_model.strip().lower().replace(".", " ")
-    if "seedance" in normalized and "fast" in normalized:
+    """把 manifest 的逻辑模型ID或 modelKey 解析成 LibTV 展示名。"""
+    raw = manifest_model.strip()
+    lowered = raw.lower()
+    if lowered in LIBTV_MODEL_DISPLAY_NAMES:
+        return LIBTV_MODEL_DISPLAY_NAMES[lowered]
+    if lowered in LIBTV_KEY_TO_DISPLAY:
+        return LIBTV_KEY_TO_DISPLAY[lowered]
+    spaced = lowered.replace(".", " ")
+    if "seedance" in spaced and "fast" in spaced:
         return "Seedance 2.0 Fast VIP"
-    return manifest_model.strip()
+    if "seedance" in spaced and "mini" in spaced:
+        return "Seedance 2.0 Mini"
+    if "seedance" in spaced and ("2 5" in spaced or "25" in spaced):
+        return "Seedance 2.5"
+    return raw
+
+
+def resolve_libtv_model(client: "LibTVClient", requested: str) -> str:
+    """用 `libtv model search` 实时校验展示名，避免 modelKey/逻辑ID被节点创建拒绝。"""
+    candidate = default_libtv_model(requested)
+    wanted_key = LIBTV_MODEL_KEYS.get(str(requested).strip().lower(), str(requested).strip().lower())
+    try:
+        payload = client.call("model", "search", candidate)
+        matches = payload.get("matches") if isinstance(payload, dict) else None
+    except LibTVBatchError:
+        return candidate
+    if not isinstance(matches, list):
+        return candidate
+    for item in matches:
+        if isinstance(item, dict) and str(item.get("modelKey", "")).lower() == wanted_key.lower():
+            return str(item.get("modelName") or candidate)
+    for item in matches:
+        if isinstance(item, dict) and str(item.get("modelName", "")).strip().lower() == candidate.strip().lower():
+            return str(item.get("modelName"))
+    return candidate
 
 
 def existing_uploads(state: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -287,7 +351,8 @@ def main() -> int:
         segments = prompt_payload["segments"]
         generation_manifest.validate_prompt_record(prompt_payload, data)
         audit = reference_audit.audit(data, segments)
-        model = args.libtv_model or default_libtv_model(str(data.get("userConfig", {}).get("videoModel", "")))
+        requested_model = args.libtv_model or str(data.get("userConfig", {}).get("videoModel", "")).strip() or "seedance-2-fast"
+        model = default_libtv_model(requested_model)
         ratio = str(data.get("userConfig", {}).get("aspectRatio", "9:16"))
         resolution = str(data.get("userConfig", {}).get("resolution", "720p"))
         plans = [
@@ -310,6 +375,7 @@ def main() -> int:
         executable = local_video_cli.resolve_libtv_cli()
         client = LibTVClient(executable, root)
         account = client.account_info()
+        model = resolve_libtv_model(client, requested_model)
         model_info = client.model_info(model)
         schema = model_info.get("schema", {}) if isinstance(model_info, dict) else {}
         duration_spec = schema.get("properties", {}).get("duration", {}) if isinstance(schema, dict) else {}
@@ -322,17 +388,20 @@ def main() -> int:
         state_path = root / "libtv-generation.json"
         state = load_state(state_path)
         project_uuid = str(args.project_uuid or state.get("projectUuid") or "").strip()
+        workspace_id = args.workspace_id or state.get("workspaceId")
         if project_uuid:
             project = client.project_info(project_uuid)
         else:
-            if not args.workspace_id:
-                raise LibTVBatchError("首次创建LibTV画布必须传入--workspace-id；后续会从状态文件自动复用。")
-            project_uuid = client.create_project(args.project_name or root.name, args.workspace_id)
+            canvas_name = args.project_name or root.name
+            if not workspace_id:
+                # 未指定工作区时自动创建，避免为了拿 workspaceId 来回往返。
+                workspace_id = client.create_workspace(canvas_name, "recreate-video-agent 自动创建")
+            project_uuid = client.create_project(canvas_name, int(workspace_id))
             project = client.project_info(project_uuid)
         known_nodes = node_index(project)
         state.update({
             "schemaVersion": "1.0", "provider": "libtv_cli", "projectUuid": project_uuid,
-            "workspaceId": args.workspace_id or state.get("workspaceId"), "model": model,
+            "workspaceId": workspace_id, "model": model, "requestedModel": requested_model,
             "status": "preparing", "account": {"memberName": account.get("memberName")},
         })
         atomic_write_json(state_path, state)

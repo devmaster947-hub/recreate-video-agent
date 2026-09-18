@@ -1,11 +1,11 @@
 ---
 name: recreate-video-agent
-description: 使用灵智工坊CLI调用RecreateVideoPromptV3拆解原视频；图片生成与编辑使用智能体原生能力，视频生成按LibTV、小云雀、即梦CLI的固定顺序自动选择。
+description: 适用于复刻 TikTok、抖音等平台的爆款带货视频。通过灵智工坊拆解原片的动作、镜头、声音和营销节奏，再结合真实帧分镜替换商品、达人及目标市场内容，最后自动选择可用的视频生成通道完成成片。
 license: Apache-2.0
 metadata:
   skillhub:
     slug: recreate-video-agent
-    version: 1.0.0
+    version: 1.0.2
     displayName: 复刻爆款视频
     summary: 拆解爆款短视频，替换商品与达人后生成新的分镜、视频提示词和成片。
     tags:
@@ -16,7 +16,11 @@ metadata:
     homepage: https://github.com/devmaster947-hub/recreate-video-agent
 ---
 
-# recreate-video-agent V5.1 Identity Bindings
+# recreate-video-agent v5.1
+
+## 技能概述
+
+本技能用于将已授权的爆款带货视频复刻为新的商业视频。它会分析原片的镜头结构、人物动作、运镜、口播、声音和营销节奏，按分段生成真实帧分镜，并按需替换商品、达人、语言及目标市场内容。完成分镜和提示词确认后，技能会自动选择首个可用的视频生成通道，生成、拼接并交付成片。
 
 ## 工具边界（全流程最高优先级）
 
@@ -56,7 +60,7 @@ python3 scripts/lingzhi_key_preflight.py
 
 ## 1. 预检与初始化
 
-在Windows x64上，Skill内置`cli/windows-x64/lzstudio.exe`，`server_video_analysis.py`可直接发现并调用，不要求全局安装。只有用户明确要求安装到系统PATH时，才按 references/windows_lzstudio_cli.md 运行安装脚本。不从网络下载或自动替换内置二进制。
+当前安装版保留 macOS Apple Silicon 和 Windows x64 的内置 LZStudio CLI；`server_video_analysis.py`按 `--cli`、`LZSTUDIO_CLI`、内置 CLI、系统 `PATH` 的顺序发现可执行文件。只有用户明确要求安装到系统 `PATH` 时，才按 references/windows_lzstudio_cli.md 运行安装脚本。不从网络下载或自动替换内置二进制。
 
 读取原文件时长（最长360秒），确认后运行generation_manifest.py init、benchmark_analysis.py和set-benchmark-analysis。源视频保持不变。技术分析阶段只产生媒体信息与technicalCutCandidates；最终Segment与Storyboard锚点由服务端确定，此时不抽板、不在客户端计算最终分段。原时长模式按视频模型要求取最近整数秒；当整数目标与真实媒体时长差值不超过0.5秒时，这是正常归一化，不得作为异常、阻塞或要求用户确认。
 
@@ -95,7 +99,7 @@ Planner V2沿用V1分段引擎与时长规则：最少Segment、整数秒模型�
 
 ## 4. 生成唯一rawStoryboard
 
-执行storyboard.py，传--video、--timestamps-file、--output-dir、--model。当前Planner V2返回9个anchors，因此每段生成一张3×3 Storyboard；客户端不读取服务端layout字段，而是从anchors数量派生布局。抽帧成功、9格齐全、时间戳位于Segment窗口内由程序硬校验；不再为了模糊、闭眼、遮挡等逐阶段单独调用视觉质检。起点保持Segment开始状态。因最近整数秒取整而多出的尾部只延续或定格原片最后可观察状态，不得凭空新增镜头、动作、对白或剧情；这类不超过0.5秒的尾部补齐静默处理，无需向用户报警。
+执行storyboard.py，传--video、--timestamps-file、--output-dir、--model（`--timestamps-file`既接受9个anchor对象的JSON，也接受每行一个时间戳的纯文本，不要再为格式往返试探）。当前Planner V2返回9个anchors，因此每段生成一张3×3 Storyboard；客户端不读取服务端layout字段，而是从anchors数量派生布局。抽帧成功、9格齐全、时间戳位于Segment窗口内由程序硬校验；不再为了模糊、闭眼、遮挡等逐阶段单独调用视觉质检。起点保持Segment开始状态。因最近整数秒取整而多出的尾部只延续或定格原片最后可观察状态，不得凭空新增镜头、动作、对白或剧情；这类不超过0.5秒的尾部补齐静默处理，无需向用户报警。
 
 抽板后、首次图片编辑前，完整读取 references/entity_bindings.md。在原有分镜理解步骤对照原始九格与蓝图核对关键人物/产品，仅有具体疑问时补看相关原片帧；保存来源人物/产品到目标的 replacementBindings。不能把说话人当成人物清单，也不能把所有人物替换为同一达人。此来源核对不增加编辑后或视频生成后质检。
 
@@ -142,7 +146,7 @@ python3 scripts/video_cli_preflight.py --manifest <manifest>
 
 严格按返回的`selected`处理：
 
-1. `libtv_cli`：完整读取`libtv-cli` Skill，执行只读账户、项目、模型schema与参考图能力检查。首次生成统一运行`python3 scripts/libtv_batch_generate.py --manifest <manifest> --workspace-id <id> --generation-approved [--vip-download]`；已有画布时可传`--project-uuid <uuid>`代替workspace。该命令一次完成参考图去重上传、nodeKey回填、按顺序连接最终Storyboard/产品图/人物图、实际UUID占位符写入、全Segment并行运行及下载。禁止再手工逐节点编排。`libtv node ... --run`会自行等待终态；脚本不额外轮询，任务不确定时保留状态并禁止自动重提。仅需检查时传`--plan-only`，不创建画布、不上传、不提交付费任务。
+1. `libtv_cli`：完整读取`libtv-cli` Skill，执行只读账户、项目、模型schema与参考图能力检查。模型名、工作区与画布由脚本自动解析和创建，不要手工试探`--libtv-model`或先取workspaceId。首次生成统一运行`python3 scripts/libtv_batch_generate.py --manifest <manifest> --generation-approved [--vip-download]`；如需指定工作区可传`--workspace-id <id>`，已有画布时可传`--project-uuid <uuid>`复用。该命令一次完成参考图去重上传、nodeKey回填、按顺序连接最终Storyboard/产品图/人物图、实际UUID占位符写入、全Segment并行运行及下载。禁止再手工逐节点编排。`libtv node ... --run`会自行等待终态；脚本不额外轮询，任务不确定时保留状态并禁止自动重提。仅需检查时传`--plan-only`，不创建画布、不上传、不提交付费任务。
 2. `xiaoyunque_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider xiaoyunque_cli --generation-approved`。
 3. `dreamina_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider dreamina_cli --generation-approved`。
 4. `null`：运行`python3 scripts/prepare_manual_video_handoff.py --manifest <manifest>`，再按 references/generation_rules.md 的“无CLI手动交付”模板回复。必须列出三种可安装CLI，并按Segment明确列出Storyboard、产品图、人物身份图的实际文件；不得只交付一句泛化的“Prompt和参考图已就绪”。

@@ -40,8 +40,13 @@ def file_sha256(path: str | Path) -> str:
 
 def skill_version(skill_root: str | Path | None = None) -> str:
     source = Path(skill_root or SKILL_ROOT).resolve() / "SKILL.md"
-    match = re.search(r"^#\s+recreate-video-agent\s+[vV]([^\s]+)", source.read_text(encoding="utf-8"), re.MULTILINE)
-    return match.group(1) if match else "unknown"
+    text = source.read_text(encoding="utf-8")
+    match = re.search(r"^#\s+recreate-video-agent\s+[vV]([^\s]+)", text, re.MULTILINE)
+    if match:
+        return match.group(1)
+    # SkillHub 发行包会改写 SKILL.md 标题，此时回退到 frontmatter 的 version 字段。
+    frontmatter = re.search(r"^version:\s*([^\s]+)\s*$", text, re.MULTILINE)
+    return frontmatter.group(1) if frontmatter else "unknown"
 
 
 def optimization_relative_path(value: str) -> Path:

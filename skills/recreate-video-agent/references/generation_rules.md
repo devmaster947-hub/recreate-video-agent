@@ -28,6 +28,11 @@ python3 scripts/video_cli_preflight.py --manifest <manifest>
 
 `libtv node ... --run`会自行提交、轮询并等待终态；调用方直接等待进程返回，不额外轮询，不因stderr中出现taskId而提前结束。
 
+已内置的容错（不要再手工试探参数，避免浪费往返）：
+
+- **模型名自动解析**：manifest 的逻辑模型ID（`seedance-2-mini/fast/2/2-5`）和 LibTV modelKey（`star-video2-mini`）都会自动映射为 CLI 只接受的展示名（`Seedance 2.0 Mini` 等），并在提交前用`libtv model search`实时校验。不要手动传 modelKey。
+- **工作区与画布自动创建**：首次运行不必先手工取`workspaceId`，未传`--workspace-id`时脚本自动创建工作区；`libtv project create`返回的`projectMeta.uuid`也已兼容解析。已有画布时传`--project-uuid`复用。
+
 ## 小云雀与即梦CLI
 
 小云雀：

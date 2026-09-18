@@ -112,7 +112,15 @@ def version_at_least(value: str, major: int, minor: int) -> bool:
 def current_or_legacy_at_least(value: str, major: int, minor: int) -> bool:
     """Treat the renumbered V4.3 release as current while preserving V6.x manifests."""
     normalized = str(value).strip()
-    return normalized in {"5.0", CURRENT_SKILL_VERSION} or version_at_least(normalized, major, minor)
+    if normalized in {"", "unknown"}:
+        # SkillHub 安装包的 SKILL.md 标题被改写，版本号无法识别；按当前代码能力处理。
+        return True
+    if normalized in {"5.0", CURRENT_SKILL_VERSION}:
+        return True
+    # SkillHub 发行包用独立包版本号（如 1.0.1），与技能内容版本不同步，一律按当前代码能力处理。
+    if normalized.startswith("1.") and normalized.count(".") >= 2:
+        return True
+    return version_at_least(normalized, major, minor)
 
 
 def validate_identity_roster(

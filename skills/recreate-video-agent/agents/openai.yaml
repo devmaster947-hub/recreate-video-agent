@@ -1,4 +1,4 @@
 interface:
   display_name: "复刻爆款视频"
   short_description: "拆解对标视频，替换商品和达人并生成成片"
-  default_prompt: "Use $recreate-video-agent to analyze the authorized benchmark through RecreateVideoPromptV3 only, use the agent-native image generation/editing capability for all image work, and select video generation in the fixed order LibTV, Xiaoyunque CLI, then Dreamina CLI."
+  default_prompt: "使用 $recreate-video-agent 复刻已授权的对标视频：灵智工坊只负责原片语义拆解，所有图片工作使用智能体原生图像能力，视频生成按 LibTV、小云雀、即梦的顺序选择首个可用通道。"

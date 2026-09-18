@@ -2,7 +2,7 @@
 
 Skill 调用名：`recreate-video-agent`
 
-SkillHub 版本：`1.0.0`
+SkillHub 版本：`1.0.2`
 
 当前工作流：`V5.1 Identity Bindings`
 
@@ -40,7 +40,7 @@ $recreate-video-agent 帮我复刻这个带货视频
 - 至少一个可用的视频生成通道：LibTV、小云雀 CLI 或即梦 CLI。
 - 生成任务会调用外部服务，费用与素材上传范围按实际服务和用户授权执行。
 
-Skill 内置 macOS Apple Silicon 和 Windows x64 的 LZStudio CLI。内置 CLI 只用于 `RecreateVideoPromptV3` 拆解，不用于生成图片或视频。
+Skill 内置 macOS Apple Silicon 和 Windows x64 的 LZStudio CLI `0.0.5`。技能会依次检查显式 `--cli`、`LZSTUDIO_CLI`、内置 CLI 和系统 `PATH`；内置 CLI 只用于 `RecreateVideoPromptV3` 拆解，不用于生成图片或视频。
 
 ## 目录
 

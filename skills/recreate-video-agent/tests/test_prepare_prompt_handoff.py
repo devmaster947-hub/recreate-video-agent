@@ -117,6 +117,7 @@ class PreparePromptHandoffTests(unittest.TestCase):
                     "semanticSource": "unobserved",
                 })
             manifest = {
+                "skillVersion": "4.2",
                 "benchmarkVideo": {"analysis": {"recommendedSegments": [{"segmentId": 1, "globalStart": 0, "globalEnd": 9}]}},
                 "userConfig": {"duration": 9},
                 "storyboards": {"original": [{"storyboardId": 1, "file": str(board), "anchors": anchors}], "edited": []},

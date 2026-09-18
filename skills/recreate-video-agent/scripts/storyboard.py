@@ -141,8 +141,28 @@ def normalize_segment(raw: dict[str, Any], expected_id: int) -> dict[str, Any]:
     }
 
 
+def load_anchor_payload(path: Path) -> Any:
+    """接受 JSON；也接受每行一个时间戳的纯文本，避免格式问题阻塞抽帧。"""
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        values: list[dict[str, Any]] = []
+        for line in text.splitlines():
+            item = line.strip()
+            if not item:
+                continue
+            try:
+                values.append({"timestamp": float(item), "productPresent": True, "personPresent": True})
+            except ValueError as exc:
+                raise ValueError(f"时间戳文件必须是JSON，或每行一个数字；无法解析：{item!r}") from exc
+        if not values:
+            raise ValueError("时间戳文件为空。")
+        return values
+
+
 def parse_segment_plan(path: Path, *, media_duration: float | None = None) -> list[dict[str, Any]]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw = load_anchor_payload(path)
     if isinstance(raw, dict) and isinstance(raw.get("segments"), list):
         segments = [normalize_segment(item, index) for index, item in enumerate(raw["segments"], 1)]
     else:
