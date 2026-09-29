@@ -2,7 +2,7 @@
 
 Skill 调用名：`recreate-video-agent`
 
-SkillHub 版本：`1.0.3`
+SkillHub 版本：`1.1.1`
 
 当前工作流：`V5.1 Identity Bindings`
 

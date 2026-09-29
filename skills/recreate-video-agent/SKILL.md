@@ -5,7 +5,7 @@ license: Apache-2.0
 metadata:
   skillhub:
     slug: recreate-video-agent
-    version: 1.0.3
+    version: 1.1.1
     displayName: 复刻爆款视频
     summary: 拆解爆款短视频，替换商品与达人后生成新的分镜、视频提示词和成片。
     tags:
