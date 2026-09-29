@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Video CLI discovery plus local Dreamina/Xiaoyunque generation helpers."""
+"""Video CLI discovery plus Dreamina, Xiaoyunque, and Lingzhi generation helpers."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+SKILL_ROOT = Path(__file__).resolve().parent.parent
+
 try:
     from scripts import service_privacy
     from scripts.model_capabilities import LOCAL_CLI_REQUIRED_MODEL_IDS, MODEL_CAPABILITIES, normalize_model, validate_generation
@@ -27,8 +29,10 @@ PENDING_STATES = {
 }
 SUCCESS_STATES = {"succeeded", "success", "completed", "complete"}
 FAILED_STATES = {"failed", "failure", "fail", "error", "cancelled", "canceled"}
-VIDEO_PROVIDERS = {"auto", "dreamina_cli", "xiaoyunque_cli"}
-GENERATION_PROVIDER_ORDER = ("libtv_cli", "xiaoyunque_cli", "dreamina_cli")
+VIDEO_PROVIDERS = {"auto", "dreamina_cli", "xiaoyunque_cli", "lingzhi_cli"}
+GENERATION_PROVIDER_ORDER = ("libtv_cli", "xiaoyunque_cli", "dreamina_cli", "lingzhi_cli")
+LINGZHI_IMAGE_MODEL_ID = "gpt-image-2"
+LINGZHI_IMAGE_RESOLUTION = "1K"
 
 DREAMINA_VIDEO_MODEL_IDS = {
     key: str(value["dreaminaId"])
@@ -110,6 +114,29 @@ def resolve_libtv_cli(*, cli_path: str | os.PathLike[str] | None = None) -> Path
     return _resolve_executable(names, configured=configured, cli_path=cli_path)
 
 
+def resolve_lingzhi_cli(*, cli_path: str | os.PathLike[str] | None = None) -> Path:
+    if cli_path:
+        candidate = Path(cli_path).expanduser().resolve()
+    else:
+        configured = os.environ.get("LZSTUDIO_CLI", "").strip()
+        if configured:
+            candidate = Path(configured).expanduser().resolve()
+        else:
+            architecture = platform.machine().lower()
+            bundled: Path | None = None
+            if platform.system() == "Darwin" and architecture in {"arm64", "aarch64"}:
+                bundled = SKILL_ROOT / "cli" / "macos-arm64" / "lzstudio"
+            elif platform.system() == "Windows" and architecture in {"amd64", "x86_64", "x64"}:
+                bundled = SKILL_ROOT / "cli" / "windows-x64" / "lzstudio.exe"
+            discovered = shutil.which("lzstudio") or shutil.which("lzstudio.exe")
+            candidate = bundled if bundled and bundled.is_file() else Path(discovered).resolve() if discovered else Path()
+    if not candidate.is_file() or candidate.stat().st_size <= 0:
+        raise LocalVideoCliError("未发现可执行 CLI：lzstudio")
+    if platform.system() != "Windows" and not os.access(candidate, os.X_OK):
+        raise LocalVideoCliError(f"CLI 不可执行：{candidate}")
+    return candidate.resolve()
+
+
 def libtv_cli_available(*, cli_path: str | os.PathLike[str] | None = None) -> bool:
     """Return true only when the executable exists and its help command starts successfully."""
     try:
@@ -121,6 +148,30 @@ def libtv_cli_available(*, cli_path: str | os.PathLike[str] | None = None) -> bo
     except (LocalVideoCliError, OSError, subprocess.SubprocessError):
         return False
     return completed.returncode == 0
+
+
+def lingzhi_cli_available(*, cli_path: str | os.PathLike[str] | None = None) -> bool:
+    try:
+        executable = resolve_lingzhi_cli(cli_path=cli_path)
+        submit = subprocess.run(
+            [str(executable), "video", "submit", "--help"],
+            check=False, capture_output=True, text=True, timeout=30,
+        )
+        fetch = subprocess.run(
+            [str(executable), "video", "fetch", "--help"],
+            check=False, capture_output=True, text=True, timeout=30,
+        )
+    except (LocalVideoCliError, OSError, subprocess.SubprocessError):
+        return False
+    submit_text = f"{submit.stdout}\n{submit.stderr}"
+    fetch_text = f"{fetch.stdout}\n{fetch.stderr}"
+    required = ("--model", "--prompt", "--duration", "--aspect-ratio", "--resolution", "--reference-images")
+    return (
+        submit.returncode == 0
+        and fetch.returncode == 0
+        and all(token in submit_text for token in required)
+        and "--id" in fetch_text
+    )
 
 
 def _run(executable: Path, arguments: Sequence[str], *, provider: str, timeout: float = 600.0) -> Any:
@@ -145,6 +196,54 @@ def _run(executable: Path, arguments: Sequence[str], *, provider: str, timeout: 
             f"{service_privacy.public_error(detail[:1000], '未知错误')}"
         )
     parsed = _parse_json(completed.stdout, provider)
+    service_privacy.raise_if_authorization_unavailable(parsed)
+    return parsed
+
+
+def load_lingzhi_key() -> str:
+    for name in ("LZSTUDIO_API_KEY", "RECREATE_VIDEO_API_KEY"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    config = Path.home() / ".recreate-video" / "config.json"
+    if config.is_file():
+        try:
+            value = json.loads(config.read_text(encoding="utf-8")).get("apiKey", "")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            value = ""
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    raise LocalVideoCliError("本机未配置灵智工坊 API Key。")
+
+
+def run_lingzhi_cli(
+    arguments: Sequence[str],
+    *,
+    cli_path: str | os.PathLike[str] | None = None,
+    timeout: float = 600.0,
+) -> Any:
+    normalized = list(map(str, arguments))
+    if len(normalized) < 2 or normalized[0] not in {"image", "video"}:
+        raise LocalVideoCliError("灵智工坊生成命令必须是 image/video submit/fetch。")
+    executable = resolve_lingzhi_cli(cli_path=cli_path)
+    key = load_lingzhi_key()
+    command = [str(executable), *normalized[:2], "--api-key", key, *normalized[2:]]
+    try:
+        completed = subprocess.run(
+            command, text=True, capture_output=True, check=False, timeout=timeout, shell=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise LocalVideoCliError(f"灵智工坊 CLI 调用超时（{timeout:g} 秒）。") from None
+    except OSError as exc:
+        raise LocalVideoCliError(f"无法启动灵智工坊 CLI：{exc}") from None
+    if completed.returncode != 0:
+        detail = (completed.stderr.strip() or completed.stdout.strip() or "未知错误").replace(key, "[REDACTED]")
+        service_privacy.raise_if_authorization_unavailable(detail)
+        raise LocalVideoCliError(
+            f"灵智工坊 CLI 退出码 {completed.returncode}："
+            f"{service_privacy.public_error(detail[:1000], '未知错误')}"
+        )
+    parsed = _parse_json(completed.stdout, "灵智工坊")
     service_privacy.raise_if_authorization_unavailable(parsed)
     return parsed
 
@@ -219,12 +318,13 @@ def detect_video_providers(model: str | None = None) -> dict[str, bool]:
         xiaoyunque = True
     except LocalVideoCliError:
         xiaoyunque = False
+    lingzhi = lingzhi_cli_available()
     if model:
         if dreamina and not dreamina_cli_supports_video_model(model):
             dreamina = False
         if xiaoyunque and not xiaoyunque_cli_supports_video_model(model):
             xiaoyunque = False
-    return {"dreamina_cli": dreamina, "xiaoyunque_cli": xiaoyunque}
+    return {"dreamina_cli": dreamina, "xiaoyunque_cli": xiaoyunque, "lingzhi_cli": lingzhi}
 
 
 def detect_generation_providers(model: str | None = None) -> dict[str, bool]:
@@ -234,6 +334,7 @@ def detect_generation_providers(model: str | None = None) -> dict[str, bool]:
         "libtv_cli": libtv_cli_available(),
         "xiaoyunque_cli": local["xiaoyunque_cli"],
         "dreamina_cli": local["dreamina_cli"],
+        "lingzhi_cli": local["lingzhi_cli"],
     }
 
 
@@ -245,7 +346,7 @@ def resolve_generation_provider(*, availability: Mapping[str, bool] | None = Non
 def resolve_video_provider(video_provider: str = "auto", *, availability: Mapping[str, bool] | None = None) -> str | None:
     provider = str(video_provider).strip().lower()
     if provider not in VIDEO_PROVIDERS:
-        raise LocalVideoCliError("videoProvider 必须是 auto、dreamina_cli 或 xiaoyunque_cli。")
+        raise LocalVideoCliError("videoProvider 必须是 auto、dreamina_cli、xiaoyunque_cli 或 lingzhi_cli。")
     channels = dict(availability or detect_video_providers())
     if provider != "auto":
         if not channels.get(provider, False):
@@ -255,11 +356,15 @@ def resolve_video_provider(video_provider: str = "auto", *, availability: Mappin
         return "xiaoyunque_cli"
     if channels.get("dreamina_cli"):
         return "dreamina_cli"
+    if channels.get("lingzhi_cli"):
+        return "lingzhi_cli"
     return None
 
 
 def _provider_model_id(provider: str, model: str) -> str:
     model_id = _model_id(model)
+    if provider == "lingzhi_cli":
+        return model_id
     mapping = DREAMINA_VIDEO_MODEL_IDS if provider == "dreamina_cli" else XIAOYUNQUE_VIDEO_MODEL_IDS
     provider_id = mapping.get(model_id)
     if not provider_id:
@@ -293,33 +398,70 @@ def submit_video(
     aspect_ratio: str = "9:16",
     resolution: str = "720p",
 ) -> str:
-    if provider not in {"dreamina_cli", "xiaoyunque_cli"}:
+    if provider not in {"dreamina_cli", "xiaoyunque_cli", "lingzhi_cli"}:
         raise LocalVideoCliError(f"未知本地视频 provider：{provider}")
     if not isinstance(prompt, str) or not prompt.strip():
         raise LocalVideoCliError("视频 Prompt 不能为空。")
     checked = validate_generation(_model_id(model), duration, resolution)
     files = _reference_files(reference_files, int(checked.get("maxImages", 9)))
     model_id = _provider_model_id(provider, model)
-    command = "multimodal2video" if files else "text2video"
-    arguments = [
-        command,
-        "--prompt", prompt.strip(),
-        "--duration", str(int(checked["duration"])),
-        "--ratio", aspect_ratio,
-        "--video_resolution", resolution,
-        "--model_version", model_id,
-    ]
-    for path in files:
-        arguments.extend(["--image", str(path)])
-    value = run_dreamina_cli(arguments) if provider == "dreamina_cli" else run_xiaoyunque_cli(arguments)
+    if provider == "lingzhi_cli":
+        arguments = [
+            "video", "submit", "--model", model_id, "--prompt", prompt.strip(),
+            "--duration", str(int(checked["duration"])), "--aspect-ratio", aspect_ratio,
+            "--resolution", resolution,
+        ]
+        for path in files:
+            arguments.extend(["--reference-images", str(path)])
+        value = run_lingzhi_cli(arguments)
+    else:
+        command = "multimodal2video" if files else "text2video"
+        arguments = [
+            command,
+            "--prompt", prompt.strip(),
+            "--duration", str(int(checked["duration"])),
+            "--ratio", aspect_ratio,
+            "--video_resolution", resolution,
+            "--model_version", model_id,
+        ]
+        for path in files:
+            arguments.extend(["--image", str(path)])
+        value = run_dreamina_cli(arguments) if provider == "dreamina_cli" else run_xiaoyunque_cli(arguments)
     return _task_id(value)
 
 
 def fetch_video(provider: str, task_id: str) -> Any:
     if not str(task_id).strip():
         raise LocalVideoCliError("任务 id 不能为空。")
+    if provider == "lingzhi_cli":
+        return run_lingzhi_cli(["video", "fetch", "--id", str(task_id).strip()], timeout=300)
     arguments = ["query_result", "--submit_id", str(task_id).strip()]
     return run_dreamina_cli(arguments, timeout=300) if provider == "dreamina_cli" else run_xiaoyunque_cli(arguments, timeout=300)
+
+
+def submit_lingzhi_image(
+    prompt: str,
+    *,
+    reference_files: Iterable[str | os.PathLike[str]] | None = None,
+    aspect_ratio: str = "9:16",
+) -> str:
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise LocalVideoCliError("图片 Prompt 不能为空。")
+    files = _reference_files(reference_files, 9)
+    arguments = [
+        "image", "submit", "--model", LINGZHI_IMAGE_MODEL_ID,
+        "--prompt", prompt.strip(), "--aspect-ratio", aspect_ratio,
+        "--resolution", LINGZHI_IMAGE_RESOLUTION,
+    ]
+    for path in files:
+        arguments.extend(["--reference-images", str(path)])
+    return _task_id(run_lingzhi_cli(arguments))
+
+
+def fetch_lingzhi_image(task_id: str) -> Any:
+    if not str(task_id).strip():
+        raise LocalVideoCliError("任务 id 不能为空。")
+    return run_lingzhi_cli(["image", "fetch", "--id", str(task_id).strip()], timeout=300)
 
 
 def _unwrap(value: Any) -> Any:

@@ -5,7 +5,7 @@ license: Apache-2.0
 metadata:
   skillhub:
     slug: recreate-video-agent
-    version: 1.0.2
+    version: 1.0.3
     displayName: 复刻爆款视频
     summary: 拆解爆款短视频，替换商品与达人后生成新的分镜、视频提示词和成片。
     tags:
@@ -24,12 +24,12 @@ metadata:
 
 ## 工具边界（全流程最高优先级）
 
-- 灵智工坊CLI只允许用于`RecreateVideoPromptV3`的原视频语义拆解与提示词蓝图返回，不得用它生成、编辑、替换或重绘图片，也不得用它生成或重生成视频。
-- 任何图片生成或编辑，包括商品图、达人图、身份图、Storyboard去字、人物/商品替换与整板重绘，只使用当前智能体的原生生图/图片编辑能力。
-- 视频生成阶段必须依次检测本机`libtv`、小云雀CLI和即梦CLI，固定优先级为`libtv_cli → xiaoyunque_cli → dreamina_cli`。选中第一个存在且通过基础可用性检查的CLI后立即用它执行已授权的首次生成，不再要求用户手动选渠道。
+- 灵智工坊CLI始终用于`RecreateVideoPromptV3`原视频语义拆解；它同时是当前智能体没有原生图像能力时的图片兜底，以及其他三个视频CLI都不可用时的视频兜底。
+- 任何图片生成或编辑，包括商品图、达人图、身份图、Storyboard去字、人物/商品替换与整板重绘，固定路由为`智能体原生图像能力 → lingzhi_cli`。只有当前会话没有原生图像工具时才调用灵智；原生工具存在但单次失败时不得自动切换。灵智图片固定使用`gpt-image-2`与`1K`，比例沿用当前任务。
+- 视频生成阶段必须依次检测本机`libtv`、小云雀CLI、即梦CLI和灵智工坊CLI，固定优先级为`libtv_cli → xiaoyunque_cli → dreamina_cli → lingzhi_cli`。选中第一个存在且通过基础可用性检查的CLI后立即用它执行已授权的首次生成，不再要求用户手动选渠道。
 - 使用LibTV时必须完整读取已安装的`libtv-cli` Skill，并以`libtv --help`及子命令`--help`为当前接口事实来源；不猜测参数、模型ID或私有HTTP地址。小云雀和即梦通过Skill内置的本地CLI适配器调用。
 - 视频CLI预检必须按优先级短路：一旦发现可用LibTV，立即返回其绝对可执行路径并跳过小云雀、即梦、MCP资源枚举、插件市场搜索和网页探测。`libtv`不在`PATH`时必须检查官方默认安装位`~/.libtv/libtv`（Windows为`~/.libtv/libtv.exe`）；同一任务后续复用预检返回路径，不重新发现连接。
-- 三家CLI都未检测到时，不安装、不调用其他平台。必须以友好方式同时告知用户两种后续方案：安装LibTV、小云雀或即梦CLI；或复制已展示的Prompt并与指定参考图一起到其他工具生成。手动交付必须按Segment列出每张实际所需图片的角色和可点击绝对路径，不能只说“请带参考图”。
+- 四家CLI都未检测到时，不安装、不调用其他平台。必须以友好方式同时告知用户两种后续方案：安装LibTV、小云雀、即梦或灵智工坊CLI；或复制已展示的Prompt并与指定参考图一起到其他工具生成。手动交付必须按Segment列出每张实际所需图片的角色和可点击绝对路径，不能只说“请带参考图”。
 - 后续章节或参考文件如与本边界冲突，以本节为准。
 
 ## 0. 灵智 API Key 按需门禁（仅在首次服务端拆解前）
@@ -54,9 +54,9 @@ python3 scripts/lingzhi_key_preflight.py
 
 沿用 references/start_confirmation_format.md 的一次启动确认，字段为产品、达人、模型、时长、国家、语言及其他要求。确认问题必须提供数字选项，让用户只回复`1`即可按当前配置开始，回复`2`则进入配置修改。确认开始授权本轮原视频上传、服务端拆解最多两次提交（首次明确终态失败时自动重试一次）、图片编辑及通过第一个可用视频CLI进行的首次视频生成。除这一次服务端拆解自动重试外，失败或质量不合格不自动授权其他付费重试。默认Seedance 2 Fast、原时长、原国家语言、原人物产品。逻辑模型与时长能力仍由 scripts/model_capabilities.py 决定；LibTV按实时schema解析模型，小云雀和即梦按Skill内精确provider模型ID映射，不猜测模型ID或30秒能力。
 
-图片生成与编辑使用当前智能体原生图片工具；不使用灵智工坊或其他外部图片CLI/API。服务端语义拆解仅通过LZStudio CLI的RecreateVideoPromptV3，保持现有模型路由。客户端不导出音频、不运行ASR、不做TTS或音频参考。服务端密钥严格按第0节延迟到首次灵智拆解前检查：启动阶段不检查、不索取、不提醒；密钥不在后续聊天或交付物中展示。服务端授权错误仅展示既有管理员提示，保留脱敏。
+图片生成与编辑优先使用当前智能体原生图片工具；只有当前会话没有该能力时才使用Skill内的灵智图片脚本。服务端语义拆解仅通过LZStudio CLI的RecreateVideoPromptV3，保持现有模型路由。客户端不导出音频、不运行ASR、不做TTS或音频参考。服务端密钥严格按第0节延迟到首次灵智拆解前检查：启动阶段不检查、不索取、不提醒；密钥不在后续聊天或交付物中展示。服务端授权错误仅展示既有管理员提示，保留脱敏。
 
-人物ID仍是Prompt语义绑定的硬门禁，但达人参考图按来源和Segment数量决定。绝不把原视频抽取的单帧登记或提交为达人参考图。用户提供达人图时直接使用用户图；用户未提供时，多Segment任务必须用当前智能体原生生图能力生成每位持续人物的无产品多视图，单Segment任务不生成、不提交达人参考图。
+人物ID仍是Prompt语义绑定的硬门禁，但达人参考图按来源和Segment数量决定。绝不把原视频抽取的单帧登记或提交为达人参考图。用户提供达人图时直接使用用户图；用户未提供时，多Segment任务必须按上述图片路由生成每位持续人物的无产品多视图，单Segment任务不生成、不提交达人参考图。
 
 ## 1. 预检与初始化
 
@@ -103,7 +103,11 @@ Planner V2沿用V1分段引擎与时长规则：最少Segment、整数秒模型�
 
 抽板后、首次图片编辑前，完整读取 references/entity_bindings.md。在原有分镜理解步骤对照原始九格与蓝图核对关键人物/产品，仅有具体疑问时补看相关原片帧；保存来源人物/产品到目标的 replacementBindings。不能把说话人当成人物清单，也不能把所有人物替换为同一达人。此来源核对不增加编辑后或视频生成后质检。
 
-按 references/storyboard_editing.md 清理对白字幕、双语字幕及手机UI，仅保留确有剧情作用的金额特效。使用当前智能体原生图像生成/编辑能力把去字和产品/达人替换尽量合并到一次整板编辑。快速模式不做Storyboard视觉质检或自动重做；严格模式仍执行最终视觉质检。抽帧结果为处理暂存，最终板登记为storyboards.original/edited；不建立额外故事板类别。自动重试不默认授权。
+按 references/storyboard_editing.md 清理对白字幕、双语字幕及手机UI，仅保留确有剧情作用的金额特效。按固定图片路由把去字和产品/达人替换尽量合并到一次整板编辑。当前会话无原生图像能力时，将Prompt保存到文件并运行：
+```text
+python3 scripts/lingzhi_image_generate.py --prompt-file <prompt.txt> --reference-image <reference.png> --aspect-ratio <ratio> --output <output.png> --report <report.json>
+```
+纯文生图省略`--reference-image`；多张参考图重复传参。取得taskId后只能用`--resume-task-id <id>`恢复同一任务，不得重新提交。快速模式不做Storyboard视觉质检或自动重做；严格模式仍执行最终视觉质检。抽帧结果为处理暂存，最终板登记为storyboards.original/edited；不建立额外故事板类别。自动重试不默认授权。
 
 清理完成后用generation_manifest.py add-storyboards-from-metadata登记。图片替换阶段沿用这张板，按KEEP/CHANGE/AUTO-DESIGN清单只修改用户指定人物或产品。人物在各段适度改形象但保持同一身份设定（仅用户提出此要求时）。
 
@@ -121,7 +125,7 @@ python3 scripts/storyboard_cells.py fast-prepare --original <rawStoryboard> --ed
 
 - 用户为某达人提供图片：原样登记为`user_provided`并在相关Segment提交；不得再用原片帧补充。
 - 用户未提供且只有1个Segment：不生成、不登记、不提交达人图；creatorIds只用于Prompt中描述人物。
-- 用户未提供且有多个Segment：用当前智能体原生生图能力为每位跨段或需保持一致的人物生成一张干净多视图。整张图只需包含同一人物的正面、一个侧面和背面，不再重复生成左右两个侧面；三个视图的身份、发型、服装必须一致。使用纯净中性背景，不得出现产品、道具、场景、文字、水印或原视频画面。视觉检查确认无产品后才登记。
+- 用户未提供且有多个Segment：按固定图片路由为每位跨段或需保持一致的人物生成一张干净多视图。整张图只需包含同一人物的正面、一个侧面和背面，不再重复生成左右两个侧面；三个视图的身份、发型、服装必须一致。使用纯净中性背景，不得出现产品、道具、场景、文字、水印或原视频画面。视觉检查确认无产品后才登记。
 
 登记命令：
 ```text
@@ -149,9 +153,10 @@ python3 scripts/video_cli_preflight.py --manifest <manifest>
 1. `libtv_cli`：完整读取`libtv-cli` Skill，执行只读账户、项目、模型schema与参考图能力检查。模型名、工作区与画布由脚本自动解析和创建，不要手工试探`--libtv-model`或先取workspaceId。首次生成统一运行`python3 scripts/libtv_batch_generate.py --manifest <manifest> --generation-approved [--vip-download]`；如需指定工作区可传`--workspace-id <id>`，已有画布时可传`--project-uuid <uuid>`复用。该命令一次完成参考图去重上传、nodeKey回填、按顺序连接最终Storyboard/产品图/人物图、实际UUID占位符写入、全Segment并行运行及下载。禁止再手工逐节点编排。`libtv node ... --run`会自行等待终态；脚本不额外轮询，任务不确定时保留状态并禁止自动重提。仅需检查时传`--plan-only`，不创建画布、不上传、不提交付费任务。
 2. `xiaoyunque_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider xiaoyunque_cli --generation-approved`。
 3. `dreamina_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider dreamina_cli --generation-approved`。
-4. `null`：运行`python3 scripts/prepare_manual_video_handoff.py --manifest <manifest>`，再按 references/generation_rules.md 的“无CLI手动交付”模板回复。必须列出三种可安装CLI，并按Segment明确列出Storyboard、产品图、人物身份图的实际文件；不得只交付一句泛化的“Prompt和参考图已就绪”。
+4. `lingzhi_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider lingzhi_cli --generation-approved`。
+5. `null`：运行`python3 scripts/prepare_manual_video_handoff.py --manifest <manifest>`，再按 references/generation_rules.md 的“无CLI手动交付”模板回复。必须列出四种可安装CLI，并按Segment明确列出Storyboard、产品图、人物身份图的实际文件；不得只交付一句泛化的“Prompt和参考图已就绪”。
 
-每个Segment只提交一次并立即保存返回的画布、节点或任务标识；之后只恢复同一任务。已开始提交后，失败、未知状态、超时、登录或余额异常都不得自动切换到下一家CLI，避免重复付费提交。首次提交必须处于本轮启动确认的授权内；任何重生成均需用户重新授权。灵智工坊不得用于视频生成。
+每个Segment只提交一次并立即保存返回的画布、节点或任务标识；之后只恢复同一任务。已开始提交后，失败、未知状态、超时、登录或余额异常都不得自动切换到下一家CLI，避免重复付费提交。首次提交必须处于本轮启动确认的授权内；任何重生成均需用户重新授权。
 
 付费提交前必须检查`referenceAudit.segments[].orderedFiles`：顺序为最终Storyboard、独立产品参考图、该段人物身份图。只要Replacement Map含`replaceProduct=true`，产品图必须同时出现在`registeredProductImages`、`productImages`和`orderedFiles`中；任一处缺失、文件为空，或Manifest仍标记沿用原产品，都必须阻止提交。不得因为Storyboard里已经画出了新产品而省略独立产品图。
 

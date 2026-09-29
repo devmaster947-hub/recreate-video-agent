@@ -1,6 +1,6 @@
 # V7：先分析原视频，兼容V6旧任务
 
-RecreateVideoPromptV3仅通过LZStudio task submit/fetch调用，现有主模型/兜底保持不变。这是全流程中LZStudio/灵智工坊CLI的唯一用途：拆解原视频并返回视频蓝图/提示词上下文。不得用它生成或编辑图片，不得用它生成或重生成视频。V5.1新任务输入携带`plannerVersion=2`；旧任务携带`plannerVersion=1`、benchmarkVideo媒体对象及userConfig：model、newVideoDuration、targetCountry、targetLanguage、otherRequirements、targetDuration、blueprintSchemaVersion=7.0（旧任务6.0）、technicalCutCandidates，以及仅供Code节点使用的sourceDuration、targetDurationSource。不传rawStoryboards或替换参考图；sourceDuration/targetDurationSource不注入Gemini Prompt。
+RecreateVideoPromptV3仅通过LZStudio task submit/fetch调用，现有主模型/兜底保持不变。本文件只规范拆解用途；LZStudio/灵智工坊CLI的图片与视频兜底由`SKILL.md`、`storyboard_editing.md`和`generation_rules.md`规范，不会改变RecreateVideoPromptV3的输入与输出契约。V5.1新任务输入携带`plannerVersion=2`；旧任务携带`plannerVersion=1`、benchmarkVideo媒体对象及userConfig：model、newVideoDuration、targetCountry、targetLanguage、otherRequirements、targetDuration、blueprintSchemaVersion=7.0（旧任务6.0）、technicalCutCandidates，以及仅供Code节点使用的sourceDuration、targetDurationSource。不传rawStoryboards或替换参考图；sourceDuration/targetDurationSource不注入Gemini Prompt。
 
 默认由客户端上传本地原片。仅当用户明确提供可访问的HTTP(S)视频直链并要求跳过上传时，使用`--benchmark-url`把该直链直接写入`benchmarkVideo.url`；本地原片仍用于技术分析、Storyboard和最终对齐。直链模式不得改变`mimeType=video/mp4`或单次提交规则。
 

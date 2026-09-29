@@ -34,9 +34,24 @@ class VideoCliPreflightTests(unittest.TestCase):
                 result = video_cli_preflight.inspect(Path(manifest))
             self.assertEqual(
                 result["priority"],
-                ["libtv_cli", "xiaoyunque_cli", "dreamina_cli"],
+                ["libtv_cli", "xiaoyunque_cli", "dreamina_cli", "lingzhi_cli"],
             )
             self.assertEqual(result["selected"], "xiaoyunque_cli")
+
+    def test_selects_lingzhi_only_after_first_three_channels_are_unavailable(self):
+        with tempfile.TemporaryDirectory() as td:
+            manifest = generation_manifest.command_init(
+                type("Args", (), {"output_root": td, "task_id": "task", "reuse": False})()
+            )
+            with patch.object(
+                video_cli_preflight.local_video_cli, "libtv_cli_available", return_value=False
+            ), patch.object(
+                video_cli_preflight.local_video_cli,
+                "detect_video_providers",
+                return_value={"xiaoyunque_cli": False, "dreamina_cli": False, "lingzhi_cli": True},
+            ):
+                result = video_cli_preflight.inspect(Path(manifest))
+            self.assertEqual(result["selected"], "lingzhi_cli")
 
     def test_selects_none_when_every_cli_is_unavailable(self):
         with tempfile.TemporaryDirectory() as td:
@@ -53,7 +68,7 @@ class VideoCliPreflightTests(unittest.TestCase):
             ), patch.object(
                 video_cli_preflight.local_video_cli,
                 "detect_video_providers",
-                return_value={"xiaoyunque_cli": False, "dreamina_cli": False},
+                return_value={"xiaoyunque_cli": False, "dreamina_cli": False, "lingzhi_cli": False},
             ):
                 result = video_cli_preflight.inspect(Path(manifest))
             self.assertIsNone(result["selected"])

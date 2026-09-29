@@ -1,6 +1,6 @@
 # 单一Storyboard的清理与替换
 
-仅用当前智能体的原生生图/图片编辑能力。Planner V1/V2每段为3×3、9个anchors；抽帧图只是暂存，最终只保留一张rawStoryboard/edited Storyboard。
+优先用当前智能体的原生生图/图片编辑能力；只有当前会话没有该能力时，才用`scripts/lingzhi_image_generate.py`的`gpt-image-2`、`1K`兜底。原生能力存在但单次失败时不自动切换。Planner V1/V2每段为3×3、9个anchors；抽帧图只是暂存，最终只保留一张rawStoryboard/edited Storyboard。
 
 ## 默认快速路径
 

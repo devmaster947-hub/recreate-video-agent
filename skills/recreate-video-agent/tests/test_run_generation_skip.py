@@ -100,7 +100,7 @@ class RunGenerationSkipTests(unittest.TestCase):
             with patch.object(sys, "argv", argv), patch.object(
                 run_generation.local_video_cli,
                 "detect_video_providers",
-                return_value={"dreamina_cli": False, "xiaoyunque_cli": False},
+                return_value={"dreamina_cli": False, "xiaoyunque_cli": False, "lingzhi_cli": False},
             ):
                 self.assertEqual(run_generation.main(), 0)
             saved = generation_manifest.load_manifest(manifest)

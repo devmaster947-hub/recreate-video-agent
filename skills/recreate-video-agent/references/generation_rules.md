@@ -1,6 +1,6 @@
 # 视频CLI路由与手动交付
 
-本文件在Prompt和最终Storyboard已登记、即将进入视频生成时读取。灵智工坊CLI只用于原片拆解，不得用于图片或视频生成。
+本文件在Prompt和最终Storyboard已登记、即将进入视频生成时读取。灵智工坊CLI是图片能力缺失时的图片兜底，也是视频路由的最后兜底。
 
 ## 固定检测顺序
 
@@ -15,8 +15,9 @@ python3 scripts/video_cli_preflight.py --manifest <manifest>
 1. `libtv_cli`
 2. `xiaoyunque_cli`
 3. `dreamina_cli`
+4. `lingzhi_cli`
 
-只选择第一个可用CLI。LibTV需存在可执行文件且`libtv --help`成功；小云雀和即梦还需在帮助信息中明确支持当前精确模型ID、`multimodal2video`所需参数和查询参数。检测本身不安装、更新或登录CLI。
+只选择第一个可用CLI。LibTV需存在可执行文件且`libtv --help`成功；小云雀和即梦还需在帮助信息中明确支持当前精确模型ID、`multimodal2video`所需参数和查询参数；灵智工坊需`video submit/fetch --help`完整包含当前适配器所需参数。检测本身不安装、更新或登录CLI。
 
 检测与提交是两个阶段。在任何付费提交发生前，可按优先级选择首个可用CLI。一旦某个Segment已经返回画布、节点或taskId，provider锁定；失败、超时、网络错误、登录或余额异常都不得自动切到下一家重新提交。
 
@@ -49,6 +50,16 @@ python3 scripts/run_generation.py --manifest <manifest> --video-provider dreamin
 
 这两个CLI直接读取本地图片。传入的精确provider模型ID由`scripts/model_capabilities.py`与`local_video_cli.py`共同校验，不得静默降级。默认5秒轮询；获得taskId后只恢复原provider的原任务。
 
+## 灵智工坊CLI视频兜底
+
+只有前三个渠道在付费提交前均不可用时，才运行：
+
+```text
+python3 scripts/run_generation.py --manifest <manifest> --video-provider lingzhi_cli --generation-approved
+```
+
+适配器把Manifest中的逻辑模型、时长、比例、分辨率和有序参考图原样传入`video submit`。取得taskId后立即写入Manifest，之后只用`video fetch --id`恢复该任务。
+
 ## 参考图规则
 
 每段固定顺序：
@@ -63,7 +74,7 @@ V7参考集合按完整镜头和replacementBindings确定，不要求每个角�
 
 ## 无CLI手动交付
 
-当`selected`为`null`时，先运行：
+当四家CLI都不可用、`selected`为`null`时，先运行：
 
 ```text
 python3 scripts/prepare_manual_video_handoff.py --manifest <manifest>
@@ -74,11 +85,11 @@ python3 scripts/prepare_manual_video_handoff.py --manifest <manifest>
 ```markdown
 ## 视频生成已就绪
 
-当前未检测到可用的 LibTV CLI、小云雀 CLI 或即梦 CLI，所以没有提交付费视频任务。
+当前未检测到可用的 LibTV CLI、小云雀 CLI、即梦 CLI 或灵智工坊 CLI，所以没有提交付费视频任务。
 
 你可以选择：
 
-1. 安装并配置 LibTV CLI、小云雀 CLI 或即梦 CLI，然后继续生成。
+1. 安装并配置 LibTV CLI、小云雀 CLI、即梦 CLI 或灵智工坊 CLI，然后继续生成。
 2. 把下方每段Prompt和对应参考图一起交给你常用的视频生成工具。
 
 ### Segment 01｜<title>

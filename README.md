@@ -17,7 +17,7 @@ Designed for:
 
 AI agent system for analyzing and recreating viral short videos.
 
-Current workflow: **V5.1 Identity Bindings**; SkillHub package version: **1.0.2**. It uses server-side semantic analysis and a deterministic segment plan, extracts one 3×3 source-frame storyboard per segment, supports product and creator replacement, and automatically selects the first available video CLI in the order LibTV, Xiaoyunque, then Dreamina.
+Current workflow: **V5.1 Identity Bindings**; SkillHub package version: **1.0.3**. It uses server-side semantic analysis and a deterministic segment plan, extracts one 3×3 source-frame storyboard per segment, supports product and creator replacement, prefers the agent's native image capability with Lingzhi `gpt-image-2` 1K as fallback, and selects video CLIs in the order LibTV, Xiaoyunque, Dreamina, then Lingzhi.
 
 See the [installation and usage guide](skills/recreate-video-agent/README.md) and [skill instructions](skills/recreate-video-agent/SKILL.md). Requires a Lingzhi API key and a compatible `recreate-video-prompt` server workflow; installing the skill does not deploy that backend.
 
@@ -127,7 +127,7 @@ For production-scale AI marketing video creation:
 
 用于爆款短视频分析与复刻的 AI Agent 系统。
 
-当前工作流：**V5.1 Identity Bindings**；SkillHub 包版本：**1.0.2**。通过服务端语义拆解和确定性 Segment 规划，为每段抽取一张 3×3 真实帧 Storyboard，支持替换商品与达人，并按 LibTV、小云雀、即梦的顺序自动选择首个可用视频 CLI。
+当前工作流：**V5.1 Identity Bindings**；SkillHub 包版本：**1.0.3**。通过服务端语义拆解和确定性 Segment 规划，为每段抽取一张 3×3 真实帧 Storyboard，支持替换商品与达人，图片优先使用智能体原生能力并以灵智 `gpt-image-2` 1K 兜底，视频按 LibTV、小云雀、即梦、灵智工坊的顺序自动选择首个可用 CLI。
 
 查看[安装与使用说明](skills/recreate-video-agent/README.md)和[完整技能规则](skills/recreate-video-agent/SKILL.md)。使用时需要灵智 API Key 和兼容的 `recreate-video-prompt` 服务端工作流；安装技能不会自动部署服务端。
 

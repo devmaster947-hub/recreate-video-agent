@@ -1,4 +1,4 @@
 interface:
   display_name: "复刻爆款视频"
   short_description: "拆解对标视频，替换商品和达人并生成成片"
-  default_prompt: "使用 $recreate-video-agent 复刻已授权的对标视频：灵智工坊只负责原片语义拆解，所有图片工作使用智能体原生图像能力，视频生成按 LibTV、小云雀、即梦的顺序选择首个可用通道。"
+  default_prompt: "使用 $recreate-video-agent 复刻已授权的对标视频：图片优先使用智能体原生图像能力，无该能力时用灵智 image2 1K 兜底；视频按 LibTV、小云雀、即梦、灵智工坊的顺序选择首个可用通道。"

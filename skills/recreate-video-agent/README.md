@@ -2,7 +2,7 @@
 
 Skill 调用名：`recreate-video-agent`
 
-SkillHub 版本：`1.0.2`
+SkillHub 版本：`1.0.3`
 
 当前工作流：`V5.1 Identity Bindings`
 
@@ -12,9 +12,9 @@ SkillHub 版本：`1.0.2`
 
 1. 检查原视频和参考图，确认商品、达人、模型、时长、国家与语言。
 2. 本地分析媒体和候选切镜，通过灵智工坊 `RecreateVideoPromptV3` 获得服务端复刻规划。
-3. 按每个 Segment 的9个时间锚点生成唯一 3×3 真实帧 Storyboard，再使用当前智能体的原生图像能力去字和替换对象。
+3. 按每个 Segment 的9个时间锚点生成唯一 3×3 真实帧 Storyboard，再优先使用当前智能体的原生图像能力去字和替换对象；无该能力时使用灵智 `gpt-image-2` 1K 兜底。
 4. 显示并确认每段视频 Prompt、Storyboard 和引用图。
-5. 按 `LibTV → 小云雀 CLI → 即梦 CLI` 顺序自动选择首个可用通道生成、拼接并交付成片。
+5. 按 `LibTV → 小云雀 CLI → 即梦 CLI → 灵智工坊 CLI` 顺序自动选择首个可用通道生成、拼接并交付成片。
 
 详细的授权边界、失败恢复、分段规则和素材绑定见 [SKILL.md](SKILL.md)。
 
@@ -37,10 +37,10 @@ $recreate-video-agent 帮我复刻这个带货视频
 
 - Python 3、FFmpeg 和 FFprobe。
 - 有效的灵智工坊 API Key；Skill 只在首次调用服务端拆解前执行按需鉴权预检。
-- 至少一个可用的视频生成通道：LibTV、小云雀 CLI 或即梦 CLI。
+- 至少一个可用的视频生成通道：LibTV、小云雀 CLI、即梦 CLI 或灵智工坊 CLI。
 - 生成任务会调用外部服务，费用与素材上传范围按实际服务和用户授权执行。
 
-Skill 内置 macOS Apple Silicon 和 Windows x64 的 LZStudio CLI `0.0.5`。技能会依次检查显式 `--cli`、`LZSTUDIO_CLI`、内置 CLI 和系统 `PATH`；内置 CLI 只用于 `RecreateVideoPromptV3` 拆解，不用于生成图片或视频。
+Skill 内置 macOS Apple Silicon 和 Windows x64 的 LZStudio CLI `0.0.5`。技能会依次检查显式 `--cli`、`LZSTUDIO_CLI`、内置 CLI 和系统 `PATH`；它用于 `RecreateVideoPromptV3` 拆解，也在符合固定路由条件时承担图片与视频兜底。
 
 ## 目录
 

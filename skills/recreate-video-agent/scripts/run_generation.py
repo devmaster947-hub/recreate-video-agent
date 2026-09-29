@@ -131,7 +131,11 @@ def mark_skipped(manifest_path: Path, data: dict[str, Any], model: str, channels
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True)
-    parser.add_argument("--video-provider", choices=("auto", "dreamina_cli", "xiaoyunque_cli"), default="auto")
+    parser.add_argument(
+        "--video-provider",
+        choices=("auto", "dreamina_cli", "xiaoyunque_cli", "lingzhi_cli"),
+        default="auto",
+    )
     parser.add_argument("--skip-concat", action="store_true")
     parser.add_argument("--new-candidate", action="store_true")
     parser.add_argument("--quality-retry-approved", action="store_true")
