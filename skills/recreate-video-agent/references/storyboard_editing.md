@@ -1,10 +1,10 @@
 # 单一Storyboard的清理与替换
 
-优先用当前智能体的原生生图/图片编辑能力；只有当前会话没有该能力时，才用`scripts/lingzhi_image_generate.py`的`gpt-image-2`、`1K`兜底。原生能力存在但单次失败时不自动切换。Planner V1/V2每段为3×3、9个anchors；抽帧图只是暂存，最终只保留一张rawStoryboard/edited Storyboard。
+图片固定通过 LuluLab CLI 的 `ImageGenV2`，模型 `gpt-image-2-5-sunburst`、1K，使用 `scripts/lululab_image_generate.py`。不使用原生图片工具或切换其他通道。Planner V1/V2每段为3×3、9个anchors；抽帧图只是暂存，最终只保留一张rawStoryboard/edited Storyboard。
 
 ## 默认快速路径
 
-1. 依据蓝图visibleText决定是否去字，并将去字和产品/达人替换合并到一次原生图片编辑。
+1. 依据蓝图visibleText决定是否去字，并将去字和产品/达人替换合并到一次LuluLab CLI图片编辑。
 2. 只生成一次整板候选图；不做视觉质检，不因质量问题自动重做。
 3. 不建Replacement Map，不运行`validate-map`、`preview-mask`或`lock-merge`。
 4. 运行：

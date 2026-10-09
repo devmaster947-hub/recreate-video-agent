@@ -1,57 +1,19 @@
-# 复刻爆款视频
+# 复刻爆款视频 · LuluLab CLI
 
-Skill 调用名：`recreate-video-agent`
+Skill调用名 `recreate-video-agent`，版本1.1.5。拆解、图片和视频均通过LuluLab CLI，工作流由CLI自动触发。
 
-SkillHub 版本：`1.1.1`
+- 拆解：RecreateVideoPromptV3，保持原预处理、分段规划和恢复协议。
+- 图片：ImageGenV2，gpt-image-2-5-sunburst、1K。
+- 视频：VideoGenV2，Seedance2 Mini（seedance-2-mini）、720p、每段4–15秒；20秒任务保留11秒+9秒规划。
 
-当前工作流：`V5.1 Identity Bindings`
+不调用原生图片工具，也不自动换视频平台。工作流ID内置，不要求客户端导入或部署工作流。
 
-用于在 Codex 中拆解并复刻 TikTok、抖音等爆款带货视频。Skill 会保留原片的节奏、动作、镜头和声音结构，同时按需替换商品、达人和目标市场内容。
+解压客户交付ZIP，把 `recreate-video-agent` 文件夹复制到Codex skills目录（macOS `~/.codex/skills/`，Windows `%USERPROFILE%\.codex\skills\`）。需要Python3、FFmpeg、FFprobe；内置macOS arm64与Windows x64的LuluLab CLI 0.0.2。
 
-## 工作流
+Key使用LULULAB_API_KEY或本机私有 `~/.recreate-video-lululab/config.json` 的apiKey，不写入聊天、manifest或交付物。可用LULULAB_CLI指定可执行路径。工作流ID环境变量覆盖为可选项。
 
-1. 检查原视频和参考图，确认商品、达人、模型、时长、国家与语言。
-2. 本地分析媒体和候选切镜，通过灵智工坊 `RecreateVideoPromptV3` 获得服务端复刻规划。
-3. 按每个 Segment 的9个时间锚点生成唯一 3×3 真实帧 Storyboard，再优先使用当前智能体的原生图像能力去字和替换对象；无该能力时使用灵智 `gpt-image-2` 1K 兜底。
-4. 显示并确认每段视频 Prompt、Storyboard 和引用图。
-5. 按 `LibTV → 小云雀 CLI → 即梦 CLI → 灵智工坊 CLI` 顺序自动选择首个可用通道生成、拼接并交付成片。
+一次启动确认后执行已授权的首次生成。拆解仅在服务端明确终态失败时自动重试一次；图片和视频不自动付费重试，已有taskId只恢复查询。
 
-详细的授权边界、失败恢复、分段规则和素材绑定见 [SKILL.md](SKILL.md)。
+调用：`$recreate-video-agent 帮我复刻这个视频`。详细流程见SKILL.md；任务接口见references/lululab_cli_contract.md。
 
-## 安装
-
-```sh
-git clone https://github.com/devmaster947-hub/recreate-video-agent.git
-cp -R recreate-video-agent/skills/recreate-video-agent ~/.codex/skills/
-```
-
-安装后在新的 Codex 对话中调用：
-
-```text
-$recreate-video-agent 帮我复刻这个带货视频
-```
-
-请同时提供已授权的对标视频；如需替换商品或达人，附上对应参考图。
-
-## 运行条件
-
-- Python 3、FFmpeg 和 FFprobe。
-- 有效的灵智工坊 API Key；Skill 只在首次调用服务端拆解前执行按需鉴权预检。
-- 至少一个可用的视频生成通道：LibTV、小云雀 CLI、即梦 CLI 或灵智工坊 CLI。
-- 生成任务会调用外部服务，费用与素材上传范围按实际服务和用户授权执行。
-
-Skill 内置 macOS Apple Silicon 和 Windows x64 的 LZStudio CLI `0.0.5`。技能会依次检查显式 `--cli`、`LZSTUDIO_CLI`、内置 CLI 和系统 `PATH`；它用于 `RecreateVideoPromptV3` 拆解，也在符合固定路由条件时承担图片与视频兜底。
-
-## 目录
-
-| 路径 | 用途 |
-| --- | --- |
-| `SKILL.md` | Skill 入口、流程和授权边界 |
-| `agents/openai.yaml` | Codex 展示名和默认调用提示 |
-| `scripts/` | 分析、分段、抽帧、绑定、预检、生成与交付脚本 |
-| `references/` | 按需读取的详细规则 |
-| `assets/workflows/` | 配套的服务端工作流资产 |
-| `cli/` | LZStudio CLI 内置发行文件 |
-| `tests/` | 本地回归测试 |
-
-License: Apache-2.0
+本地回归：`python3 -m unittest discover -s tests -p 'test_*.py'`。Windows包按原附件SHA256校验，未在Windows运行。

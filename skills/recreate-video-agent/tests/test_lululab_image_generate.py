@@ -12,10 +12,15 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts import lingzhi_image_generate, local_video_cli  # noqa: E402
+from scripts import lululab_image_generate, local_video_cli  # noqa: E402
 
 
-class LingzhiImageGenerateTests(unittest.TestCase):
+class LuluLabImageGenerateTests(unittest.TestCase):
+    def setUp(self):
+        self.workflow_patch = patch.object(local_video_cli, "image_workflow_id", return_value="configured-image")
+        self.workflow_patch.start()
+        self.addCleanup(self.workflow_patch.stop)
+
     def args(self, root: Path, **overrides):
         values = {
             "prompt": "make an image",
@@ -33,16 +38,16 @@ class LingzhiImageGenerateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             output = root / "image.png"
-            with patch.object(local_video_cli, "submit_lingzhi_image", return_value="task-1"), patch.object(
+            with patch.object(local_video_cli, "submit_lululab_image", return_value="task-1"), patch.object(
                 local_video_cli, "poll_task", return_value={"status": "success", "url": "https://example.com/image.png"}
             ), patch.object(local_video_cli, "download_media", return_value=output):
-                code, result = lingzhi_image_generate.execute(self.args(root))
+                code, result = lululab_image_generate.execute(self.args(root))
             self.assertEqual(code, 0)
             self.assertEqual(result["taskId"], "task-1")
-            self.assertEqual(result["model"], "gpt-image-2")
+            self.assertEqual(result["model"], "gpt-image-2-5-sunburst")
             self.assertEqual(result["resolution"], "1K")
             saved = json.loads((root / "report.json").read_text(encoding="utf-8"))
-            self.assertEqual(saved["status"], "submitted")
+            self.assertEqual(saved["status"], "success")
             self.assertEqual(saved["taskId"], "task-1")
 
     def test_resume_does_not_submit_again(self):
@@ -51,10 +56,10 @@ class LingzhiImageGenerateTests(unittest.TestCase):
             report = root / "report.json"
             report.write_text(json.dumps({"status": "submitted", "taskId": "task-1"}), encoding="utf-8")
             output = root / "image.png"
-            with patch.object(local_video_cli, "submit_lingzhi_image", side_effect=AssertionError("must not submit")), patch.object(
+            with patch.object(local_video_cli, "submit_lululab_image", side_effect=AssertionError("must not submit")), patch.object(
                 local_video_cli, "poll_task", return_value={"status": "success", "url": "https://example.com/image.png"}
             ), patch.object(local_video_cli, "download_media", return_value=output):
-                code, result = lingzhi_image_generate.execute(
+                code, result = lululab_image_generate.execute(
                     self.args(root, resume_task_id="task-1")
                 )
             self.assertEqual(code, 0)
@@ -64,10 +69,10 @@ class LingzhiImageGenerateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             with patch.object(
-                local_video_cli, "submit_lingzhi_image",
+                local_video_cli, "submit_lululab_image",
                 side_effect=local_video_cli.LocalVideoCliError("unknown"),
             ):
-                code, result = lingzhi_image_generate.execute(self.args(root))
+                code, result = lululab_image_generate.execute(self.args(root))
             self.assertEqual(code, 3)
             self.assertEqual(result["status"], "submit_outcome_unknown")
 

@@ -1,11 +1,11 @@
 ---
 name: recreate-video-agent
-description: 适用于复刻 TikTok、抖音等平台的爆款带货视频。通过灵智工坊拆解原片的动作、镜头、声音和营销节奏，再结合真实帧分镜替换商品、达人及目标市场内容，最后自动选择可用的视频生成通道完成成片。
+description: 适用于复刻 TikTok、抖音等平台的爆款带货视频。通过LuluLab拆解原片的动作、镜头、声音和营销节奏，再结合真实帧分镜替换商品、达人及目标市场内容，最后通过LuluLab CLI生成并拼接成片。
 license: Apache-2.0
 metadata:
   skillhub:
     slug: recreate-video-agent
-    version: 1.1.1
+    version: 1.1.5
     displayName: 复刻爆款视频
     summary: 拆解爆款短视频，替换商品与达人后生成新的分镜、视频提示词和成片。
     tags:
@@ -20,47 +20,50 @@ metadata:
 
 ## 技能概述
 
-本技能用于将已授权的爆款带货视频复刻为新的商业视频。它会分析原片的镜头结构、人物动作、运镜、口播、声音和营销节奏，按分段生成真实帧分镜，并按需替换商品、达人、语言及目标市场内容。完成分镜和提示词确认后，技能会自动选择首个可用的视频生成通道，生成、拼接并交付成片。
+本技能用于将已授权的爆款带货视频复刻为新的商业视频。它会分析原片的镜头结构、人物动作、运镜、口播、声音和营销节奏，按分段生成真实帧分镜，并按需替换商品、达人、语言及目标市场内容。完成分镜和提示词确认后，技能会通过LuluLab CLI生成、拼接并交付成片。
 
-## 工具边界（全流程最高优先级）
+## LuluLab CLI 固定生成通道（1.1.5）
 
-- 灵智工坊CLI始终用于`RecreateVideoPromptV3`原视频语义拆解；它同时是当前智能体没有原生图像能力时的图片兜底，以及其他三个视频CLI都不可用时的视频兜底。
-- 任何图片生成或编辑，包括商品图、达人图、身份图、Storyboard去字、人物/商品替换与整板重绘，固定路由为`智能体原生图像能力 → lingzhi_cli`。只有当前会话没有原生图像工具时才调用灵智；原生工具存在但单次失败时不得自动切换。灵智图片固定使用`gpt-image-2`与`1K`，比例沿用当前任务。
-- 视频生成阶段必须依次检测本机`libtv`、小云雀CLI、即梦CLI和灵智工坊CLI，固定优先级为`libtv_cli → xiaoyunque_cli → dreamina_cli → lingzhi_cli`。选中第一个存在且通过基础可用性检查的CLI后立即用它执行已授权的首次生成，不再要求用户手动选渠道。
-- 使用LibTV时必须完整读取已安装的`libtv-cli` Skill，并以`libtv --help`及子命令`--help`为当前接口事实来源；不猜测参数、模型ID或私有HTTP地址。小云雀和即梦通过Skill内置的本地CLI适配器调用。
-- 视频CLI预检必须按优先级短路：一旦发现可用LibTV，立即返回其绝对可执行路径并跳过小云雀、即梦、MCP资源枚举、插件市场搜索和网页探测。`libtv`不在`PATH`时必须检查官方默认安装位`~/.libtv/libtv`（Windows为`~/.libtv/libtv.exe`）；同一任务后续复用预检返回路径，不重新发现连接。
-- 四家CLI都未检测到时，不安装、不调用其他平台。必须以友好方式同时告知用户两种后续方案：安装LibTV、小云雀、即梦或灵智工坊CLI；或复制已展示的Prompt并与指定参考图一起到其他工具生成。手动交付必须按Segment列出每张实际所需图片的角色和可点击绝对路径，不能只说“请带参考图”。
-- 后续章节或参考文件如与本边界冲突，以本节为准。
+本版沿用原灵智CLI的既有工作流与输入协议，仅替换为LuluLab CLI：拆解 `RecreateVideoPromptV3`，图片 `ImageGenV2`，视频 `VideoGenV2`。工作流由CLI自动触发，客户端不导入、部署或编排服务端工作流。
 
-## 0. 灵智 API Key 按需门禁（仅在首次服务端拆解前）
+- 图片生成和编辑一律使用 `scripts/lululab_image_generate.py`，模型固定 `gpt-image-2-5-sunburst`，分辨率1K。原生图片工具和其他图片平台不参与本流程。
+- 视频一律使用 LuluLab CLI，默认 `seedance-2-mini`（Seedance2 Mini）、720p。不自动切换LibTV、小云雀、即梦或其他平台。
+- 通用命令：`lululab task submit --workflow-id <ID> --input <JSON>`；取得ID后用 `task fetch --id <ID>` 恢复。所有参考图先使用 `upload` 上传为媒体对象；顺序为最终Storyboard、需替换的产品图、人物图。
+- 工作流ID内置；`LULULAB_IMAGE_WORKFLOW_ID`、`LULULAB_VIDEO_WORKFLOW_ID`仅为可选高级覆盖项，不要求用户配置。
+- Seedance2 Mini每段4–15秒；既有11秒和9秒规划可继续使用。不要为了切换到Mini再次付费拆解。
+- CLI不可用、鉴权失败、任务失败或超时时，保留已有任务和素材，报告具体原因，不绕过固定通道或自动重做。
+- 图片和视频均使用排他进程锁。提交前持久化submit_pending，响应不确定时禁止重提；已有taskId在查询超时或下载失败后只恢复原任务。服务端明确终态失败时停止，重生成须另行授权。
+- 其余一次启动确认、拆解最多两次提交、来源绑定、预处理和任务恢复规则保留。用户已确认的生成配置适用于本次LuluLab图片和视频生成；后续模型调整按用户当前要求执行。
 
-复刻任务开始时不得检查、索取或提醒用户配置灵智工坊 API Key，也不得把 Key、登录或授权状态加入启动确认单。先正常读取原视频、展示启动确认、初始化manifest并完成本地技术分析。只有流程即将首次执行第2节、调用`RecreateVideoPromptV3`进行服务端拆解时，才运行下面的零消耗远端鉴权预检：
+## 0. LuluLab API Key 按需门禁（仅在首次服务端拆解前）
+
+复刻任务开始时不得检查、索取或提醒用户配置LuluLab API Key，也不得把 Key、登录或授权状态加入启动确认单。先正常读取原视频、展示启动确认、初始化manifest并完成本地技术分析。只有流程即将首次执行第2节、调用`RecreateVideoPromptV3`进行服务端拆解时，才运行下面的零消耗远端鉴权预检：
 
 ```text
-python3 scripts/lingzhi_key_preflight.py
+python3 scripts/lululab_key_preflight.py
 ```
 
-预检会从`LZSTUDIO_API_KEY`、`RECREATE_VIDEO_API_KEY`或`~/.recreate-video/config.json`的`apiKey`读取非空 Key，并调用灵智工坊`account --credits`完成真实服务端鉴权。只有命令返回`{"ok": true, "authenticated": true}`才算通过；“本地存在非空 Key”、CLI 可启动或未经证实的网络错误都不算通过。
+预检会从`LULULAB_API_KEY`或`~/.recreate-video-lululab/config.json`的`apiKey`读取非空 Key，并调用LuluLab`user --credits`完成真实服务端鉴权。只有命令返回`{"ok": true, "authenticated": true}`才算通过；“本地存在非空 Key”、CLI 可启动或未经证实的网络错误都不算通过。
 
-- 未配置 Key 时，只在这个按需检查节点提醒用户：“接下来需要调用灵智工坊拆解原视频，请前往 https://www.lingzhiai.com.cn/ 获取 API Key。”不得把这条提醒提前到任务开始、素材检查或启动确认阶段。
-- 远端预检因 Key 无效、权限不足、网络失败、CLI 不可用等原因未通过时，停止即将进行的灵智拆解，保留已经完成的本地分析和manifest；只展示脱敏原因，请用户检查或更换 Key 后重试。
-- 预检通过前不得上传原视频或提交灵智任务。每个新任务在首次灵智调用前都必须完成一次预检，不得因为之前任务曾通过而跳过；预检之前的本地读取、确认、初始化与技术分析不受此门禁限制。
+- 未配置 Key 时，只在这个按需检查节点提醒用户：“接下来需要调用LuluLab拆解原视频，请前往 https://customer.lululab.ai/ 获取 API Key。”不得把这条提醒提前到任务开始、素材检查或启动确认阶段。
+- 远端预检因 Key 无效、权限不足、网络失败、CLI 不可用等原因未通过时，停止即将进行的LuluLab拆解，保留已经完成的本地分析和manifest；只展示脱敏原因，请用户检查或更换 Key 后重试。
+- 预检通过前不得上传原视频或提交LuluLab任务。每个新任务在首次LuluLab调用前都必须完成一次预检，不得因为之前任务曾通过而跳过；预检之前的本地读取、确认、初始化与技术分析不受此门禁限制。
 - 如果用户提供 Key，只将其用于本地配置和鉴权；不在后续聊天、命令输出、日志、manifest或交付物中回显完整 Key。
-- 本机已配置 Key 时不提示、不重复索取，直接在按需检查节点执行远端预检。预检只证明当前 Key 可被灵智服务鉴权，不把余额数值写入日志、manifest或交付物。
+- 本机已配置 Key 时不提示、不重复索取，直接在按需检查节点执行远端预检。预检只证明当前 Key 可被LuluLab服务鉴权，不把余额数值写入日志、manifest或交付物。
 
 ## 职责与授权
 
 用户要求优先。使用最少Segment，每段唯一rawStoryboard。当前Planner V2策略输出9个anchors；Storyboard布局由客户端根据anchors数量派生，不作为服务端协议字段。原视频决定动态和声音，target Storyboard决定替换后的静态视觉。新任务默认`storyboardValidationMode=fast`；只有用户明确说“严格复刻”或要求区域锁定时才使用`strict`。旧Manifest缺少该字段时按`strict`处理。不要将用户人物微调要求推广为所有任务的默认要求。
 
-沿用 references/start_confirmation_format.md 的一次启动确认，字段为产品、达人、模型、时长、国家、语言及其他要求。确认问题必须提供数字选项，让用户只回复`1`即可按当前配置开始，回复`2`则进入配置修改。确认开始授权本轮原视频上传、服务端拆解最多两次提交（首次明确终态失败时自动重试一次）、图片编辑及通过第一个可用视频CLI进行的首次视频生成。除这一次服务端拆解自动重试外，失败或质量不合格不自动授权其他付费重试。默认Seedance 2 Fast、原时长、原国家语言、原人物产品。逻辑模型与时长能力仍由 scripts/model_capabilities.py 决定；LibTV按实时schema解析模型，小云雀和即梦按Skill内精确provider模型ID映射，不猜测模型ID或30秒能力。
+沿用 references/start_confirmation_format.md 的一次启动确认，字段为产品、达人、模型、时长、国家、语言及其他要求。确认问题必须提供数字选项，让用户只回复`1`即可按当前配置开始，回复`2`则进入配置修改。确认开始授权本轮原视频上传、服务端拆解最多两次提交（首次明确终态失败时自动重试一次）、图片编辑及通过LuluLab CLI进行的首次视频生成。除这一次服务端拆解自动重试外，失败或质量不合格不自动授权其他付费重试。默认Seedance 2 Mini、原时长、原国家语言、原人物产品。逻辑模型与时长能力仍由 scripts/model_capabilities.py 决定。
 
-图片生成与编辑优先使用当前智能体原生图片工具；只有当前会话没有该能力时才使用Skill内的灵智图片脚本。服务端语义拆解仅通过LZStudio CLI的RecreateVideoPromptV3，保持现有模型路由。客户端不导出音频、不运行ASR、不做TTS或音频参考。服务端密钥严格按第0节延迟到首次灵智拆解前检查：启动阶段不检查、不索取、不提醒；密钥不在后续聊天或交付物中展示。服务端授权错误仅展示既有管理员提示，保留脱敏。
+图片生成与编辑固定通过LuluLab CLI的ImageGenV2；服务端拆解通过RecreateVideoPromptV3；视频通过VideoGenV2。鉴权仍延迟至首次服务端调用前，密钥不在聊天或交付物中展示。客户端不导出音频、不运行ASR、不做TTS。
 
 人物ID仍是Prompt语义绑定的硬门禁，但达人参考图按来源和Segment数量决定。绝不把原视频抽取的单帧登记或提交为达人参考图。用户提供达人图时直接使用用户图；用户未提供时，多Segment任务必须按上述图片路由生成每位持续人物的无产品多视图，单Segment任务不生成、不提交达人参考图。
 
 ## 1. 预检与初始化
 
-当前安装版保留 macOS Apple Silicon 和 Windows x64 的内置 LZStudio CLI；`server_video_analysis.py`按 `--cli`、`LZSTUDIO_CLI`、内置 CLI、系统 `PATH` 的顺序发现可执行文件。只有用户明确要求安装到系统 `PATH` 时，才按 references/windows_lzstudio_cli.md 运行安装脚本。不从网络下载或自动替换内置二进制。
+当前安装版保留 macOS Apple Silicon 和 Windows x64 的内置 LuluLab CLI；`server_video_analysis.py`按 `--cli`、`LULULAB_CLI`、内置 CLI、系统 `PATH` 的顺序发现可执行文件。只有用户明确要求安装到系统 `PATH` 时，才按 references/windows_lululab_cli.md 运行安装脚本。不从网络下载或自动替换内置二进制。
 
 读取原文件时长（最长360秒），确认后运行generation_manifest.py init、benchmark_analysis.py和set-benchmark-analysis。源视频保持不变。技术分析阶段只产生媒体信息与technicalCutCandidates；最终Segment与Storyboard锚点由服务端确定，此时不抽板、不在客户端计算最终分段。原时长模式按视频模型要求取最近整数秒；当整数目标与真实媒体时长差值不超过0.5秒时，这是正常归一化，不得作为异常、阻塞或要求用户确认。
 
@@ -80,8 +83,12 @@ python3 scripts/server_video_analysis.py --manifest <manifest> --benchmark <vide
 ```text
 python3 scripts/server_video_analysis.py --manifest <manifest> --benchmark <local-video> --benchmark-url <video-url>
 ```
-`--benchmark-url`只替换上传步骤，不放宽启动确认、最多两次提交、时间轴校验或失败重试规则。
-只上传原视频；新任务请求携带`plannerVersion=2`（旧任务保留V1），userConfig附technicalCutCandidates、targetDuration、sourceDuration、targetDurationSource和blueprintSchemaVersion=7.0；服务端任务默认每5秒查询一次状态，避免任务已完成仍等待20秒轮询间隔；其中sourceDuration/targetDurationSource仅供服务端Code节点做确定性规划，不注入Gemini Prompt；不传rawStoryboards，不要求预先生成图片。线上需由管理员导入配套v3.2双版本工作流JSON（assets/workflows/replication-v2.json）；本地升级不代表线上启用。
+`--benchmark-url`必须经过安全下载及同样的预处理和校验；无需裁剪、无需压缩且确认为MP4时才沿用原URL，需要裁剪时必须上传裁剪后的文件。不放宽启动确认、最多两次提交、时间轴校验或失败重试规则。
+上传实际分析区间的视频；新任务请求携带`plannerVersion=2`（旧任务保留V1），userConfig附technicalCutCandidates、targetDuration、sourceDuration、targetDurationSource和blueprintSchemaVersion=7.0；服务端任务默认每5秒查询一次状态，避免任务已完成仍等待20秒轮询间隔；其中sourceDuration/targetDurationSource仅供服务端Code节点做确定性规划，不注入Gemini Prompt；不传rawStoryboards，不要求预先生成图片。工作流由 LuluLab CLI 自动触发，客户端不处理工作流配置。
+
+视频预处理顺序为读取原始真实时长→判断分析区间→精确裁剪→按需压缩→校验→上传。`durationMode=custom`沿用前N秒协议，优先使用`requestedDuration`，兼容旧任务的`duration`；N大于原片真实时长时明确报错。`source`分析完整原片，不按最终生成时长的最近整数秒裁剪。裁剪使用FFmpeg从0秒同步转码视频和音频为H.264/AAC MP4；无音轨时不创建音轨。独立临时任务目录在同步上传后清理，不覆盖原片。裁剪后未超过既有20,000,000字节限制时不重复编码，超过时沿用压缩策略。上传前ffprobe及完整解码校验真实时长（允许帧精度误差）、画面方向/比例和音轨，失败禁止上传或submit。`sourceDuration`始终为原始真实时长，`targetDuration`保持原协议；`analysisDuration`只保存到本地analysis，不新增Webhook字段。候选切点只保留在实际分析范围内。
+
+直链仅允许无凭据HTTP/HTTPS，每次重定向检查公共IP并固定连接已校验IP；阻止本地、内网和云元数据地址。最多3次重定向、512,000,000字节下载上限、120秒总下载时限、15秒单次网络/DNS时限；这些下载保护不改变20,000,000字节上传限制。直链即使无需裁剪也先安全下载校验，不凭本地原片或旧manifest推断远端真实时长。
 
 同一manifest排他锁、上传前preparing_submission、每次taskId原子receipt必须保留。首次任务只有在服务端明确返回`failed/failure/error/cancelled/timeout`终态时才自动重提一次；第二次失败立即停止。鉴权/余额异常、CLI异常、客户端轮询超时、未知状态或提交结果不确定均不自动重提。后台session_id继续使用同一执行会话；functions cell与进程session不可混用。无输出/无exit code/无taskId不代表未提交。已有ID只用--resume-task-id恢复最新任务。旧蓝图仍可查看，不自动迁移或额外付费重拆。
 
@@ -103,11 +110,12 @@ Planner V2沿用V1分段引擎与时长规则：最少Segment、整数秒模型�
 
 抽板后、首次图片编辑前，完整读取 references/entity_bindings.md。在原有分镜理解步骤对照原始九格与蓝图核对关键人物/产品，仅有具体疑问时补看相关原片帧；保存来源人物/产品到目标的 replacementBindings。不能把说话人当成人物清单，也不能把所有人物替换为同一达人。此来源核对不增加编辑后或视频生成后质检。
 
-按 references/storyboard_editing.md 清理对白字幕、双语字幕及手机UI，仅保留确有剧情作用的金额特效。按固定图片路由把去字和产品/达人替换尽量合并到一次整板编辑。当前会话无原生图像能力时，将Prompt保存到文件并运行：
+按 references/storyboard_editing.md 清理对白字幕、双语字幕及手机UI，仅保留确有剧情作用的金额特效。需要编辑时通过LuluLab CLI把去字和产品/达人替换合并到一次整板编辑；未替换且没有字幕/UI时原板直接进行机械准备，不进行无必要重绘。运行：
 ```text
-python3 scripts/lingzhi_image_generate.py --prompt-file <prompt.txt> --reference-image <reference.png> --aspect-ratio <ratio> --output <output.png> --report <report.json>
+python3 scripts/lululab_image_generate.py --prompt-file <prompt.txt> --reference-image <reference.png> --aspect-ratio <ratio> --output <output.png> --report <report.json>
 ```
-纯文生图省略`--reference-image`；多张参考图重复传参。取得taskId后只能用`--resume-task-id <id>`恢复同一任务，不得重新提交。快速模式不做Storyboard视觉质检或自动重做；严格模式仍执行最终视觉质检。抽帧结果为处理暂存，最终板登记为storyboards.original/edited；不建立额外故事板类别。自动重试不默认授权。
+纯文生图省略参考图参数，多图重复传参。取得taskId后仅用 `--resume-task-id` 恢复同一任务。
+快速模式不做Storyboard视觉质检或自动重做；严格模式仍执行最终视觉质检。抽帧结果为处理暂存，最终板登记为storyboards.original/edited；不建立额外故事板类别。自动重试不默认授权。
 
 清理完成后用generation_manifest.py add-storyboards-from-metadata登记。图片替换阶段沿用这张板，按KEEP/CHANGE/AUTO-DESIGN清单只修改用户指定人物或产品。人物在各段适度改形象但保持同一身份设定（仅用户提出此要求时）。
 
@@ -148,13 +156,11 @@ Prompt的指令、镜头、动作、画面、运镜和声音说明必须使用�
 python3 scripts/video_cli_preflight.py --manifest <manifest>
 ```
 
-严格按返回的`selected`处理：
-
-1. `libtv_cli`：完整读取`libtv-cli` Skill，执行只读账户、项目、模型schema与参考图能力检查。模型名、工作区与画布由脚本自动解析和创建，不要手工试探`--libtv-model`或先取workspaceId。首次生成统一运行`python3 scripts/libtv_batch_generate.py --manifest <manifest> --generation-approved [--vip-download]`；如需指定工作区可传`--workspace-id <id>`，已有画布时可传`--project-uuid <uuid>`复用。该命令一次完成参考图去重上传、nodeKey回填、按顺序连接最终Storyboard/产品图/人物图、实际UUID占位符写入、全Segment并行运行及下载。禁止再手工逐节点编排。`libtv node ... --run`会自行等待终态；脚本不额外轮询，任务不确定时保留状态并禁止自动重提。仅需检查时传`--plan-only`，不创建画布、不上传、不提交付费任务。
-2. `xiaoyunque_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider xiaoyunque_cli --generation-approved`。
-3. `dreamina_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider dreamina_cli --generation-approved`。
-4. `lingzhi_cli`：运行`python3 scripts/run_generation.py --manifest <manifest> --video-provider lingzhi_cli --generation-approved`。
-5. `null`：运行`python3 scripts/prepare_manual_video_handoff.py --manifest <manifest>`，再按 references/generation_rules.md 的“无CLI手动交付”模板回复。必须列出四种可安装CLI，并按Segment明确列出Storyboard、产品图、人物身份图的实际文件；不得只交付一句泛化的“Prompt和参考图已就绪”。
+预检只检查LuluLab。`selected=lululab_cli`时执行：
+```text
+python3 scripts/run_generation.py --manifest <manifest> --video-provider lululab_cli --generation-approved
+```
+没有可用LuluLab时保留Prompt和素材并报告CLI问题；不自动换渠道。
 
 每个Segment只提交一次并立即保存返回的画布、节点或任务标识；之后只恢复同一任务。已开始提交后，失败、未知状态、超时、登录或余额异常都不得自动切换到下一家CLI，避免重复付费提交。首次提交必须处于本轮启动确认的授权内；任何重生成均需用户重新授权。
 
@@ -166,4 +172,4 @@ python3 scripts/video_cli_preflight.py --manifest <manifest>
 
 只有用户明确要求“深度质检/复刻效果评估/对齐图”时，才运行full质量模式（本地CLI路径可传`--full-quality-review`；`quality_review.py analyze`可传`--profile full`），生成切镜扫描与aligned-comparison。保留原视频路径供此时使用。technicalPassed仅代表技术指标，不能声称语义复刻成功；对白串人、乱码、反应/反转遗漏须如实报告。失败报告不隐藏已生成成片，不自动重生成。
 
-本地修改Skill和工作流JSON不代表线上已发布。交付配套导入JSON并注明管理员导入启用后才适用新服务端契约。
+交付本地Skill、素材及生成结果；不交付或要求导入服务端工作流JSON。

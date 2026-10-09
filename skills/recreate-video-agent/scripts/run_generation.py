@@ -13,7 +13,7 @@ from typing import Any
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL_ROOT))
 
-from scripts import concat_videos, generation_manifest, local_video_cli, quality_review, reference_audit, reference_board, service_privacy  # noqa: E402
+from scripts import concat_videos, generation_manifest, local_video_cli, quality_review, reference_audit, reference_board, service_privacy, server_video_analysis  # noqa: E402
 from scripts.model_capabilities import capability  # noqa: E402
 
 
@@ -133,7 +133,7 @@ def main() -> int:
     parser.add_argument("--manifest", required=True)
     parser.add_argument(
         "--video-provider",
-        choices=("auto", "dreamina_cli", "xiaoyunque_cli", "lingzhi_cli"),
+        choices=("auto", "dreamina_cli", "xiaoyunque_cli", "lululab_cli"),
         default="auto",
     )
     parser.add_argument("--skip-concat", action="store_true")
@@ -144,8 +144,10 @@ def main() -> int:
     parser.add_argument("--segment-id", type=int, action="append", default=[])
     args = parser.parse_args()
 
+    lock_handle = None
     try:
         manifest_path = Path(args.manifest).expanduser().resolve()
+        lock_handle = server_video_analysis.acquire_run_lock(manifest_path, lock_path=manifest_path.parent / "analysis" / "video-generation.lock")
         data = generation_manifest.load_manifest(manifest_path)
         prompts_file = Path(data["videoPrompts"]["file"]).expanduser().resolve()
         prompts = json.loads(prompts_file.read_text(encoding="utf-8"))["videoPrompts"]
@@ -159,8 +161,12 @@ def main() -> int:
         if len(selected_segments) != len(segments) and not args.skip_concat:
             raise ValueError("部分 Segment 生成必须传入 --skip-concat，禁止拼接缺段候选。")
 
-        channels = local_video_cli.detect_video_providers(model)
-        provider = local_video_cli.resolve_video_provider(args.video_provider, availability=channels)
+        requested_provider = args.video_provider if args.video_provider != "auto" else "lululab_cli"
+        channels = {"lululab_cli": local_video_cli.lululab_cli_available()} if requested_provider == "lululab_cli" else local_video_cli.detect_video_providers(model)
+        if requested_provider != "auto" and not channels.get(requested_provider):
+            mark_skipped(manifest_path, data, model, channels)
+            raise ValueError(f"视频生成渠道不可用：{requested_provider}；已保留素材和任务记录。")
+        provider = local_video_cli.resolve_video_provider(requested_provider, availability=channels)
         if provider is None:
             mark_skipped(manifest_path, data, model, channels)
             print(json.dumps({
@@ -187,7 +193,7 @@ def main() -> int:
             previous = selected_attempt(existing_videos.get(segment_id, {}), candidate_id)
             previous_output = Path(str(previous.get("output_file", ""))).expanduser()
             reusable = previous.get("status") == "success" and previous_output.is_file() and previous_output.stat().st_size > 0
-            resumable = bool(str(previous.get("taskId", "")).strip()) and previous.get("status") in {"submitted", "querying"}
+            resumable = bool(str(previous.get("taskId", "")).strip()) and previous.get("status") != "terminal_failed"
             if not reusable and not resumable:
                 requires_submit = True
                 break
@@ -258,11 +264,13 @@ def main() -> int:
                 continue
             previous_task = str(previous.get("taskId", "")).strip()
             previous_provider = str(previous.get("provider", "")).strip()
-            if previous_task and previous.get("status") in {"submitted", "querying"}:
+            if previous_task and previous.get("status") != "terminal_failed":
                 if previous_provider and previous_provider != provider:
                     raise ValueError(f"Segment {segment_id} 已锁定 provider={previous_provider}，禁止切换。")
                 pending.append({**plan, "taskId": previous_task})
                 continue
+            if previous.get("status") in {"submit_pending", "submit_outcome_unknown", "terminal_failed"}:
+                raise ValueError(f"Segment {segment_id} 已有提交或失败记录；禁止自动重新提交，请核查原任务或明确授权新候选。")
             new_plans.append(plan)
 
         def submit(plan: dict[str, Any]) -> tuple[dict[str, Any], str]:
@@ -280,6 +288,8 @@ def main() -> int:
 
         submit_errors: list[str] = []
         if new_plans:
+            for plan in new_plans:
+                generation_manifest.set_video(manifest_path, int(plan["segment"]["segmentId"]), "submit_pending", candidateId=candidate_id, provider=provider, model=model)
             with ThreadPoolExecutor(max_workers=len(new_plans)) as pool:
                 futures = {pool.submit(submit, plan): plan for plan in new_plans}
                 for future in as_completed(futures):
@@ -287,7 +297,8 @@ def main() -> int:
                         plan, task_id = future.result()
                     except service_privacy.AuthorizationUnavailableError:
                         raise
-                    except (OSError, ValueError, local_video_cli.LocalVideoCliError) as exc:
+                    except (OSError, ValueError, local_video_cli.LocalVideoCliError, server_video_analysis.AnalysisError) as exc:
+                        generation_manifest.set_video(manifest_path, int(futures[future]["segment"]["segmentId"]), "submit_outcome_unknown", candidateId=candidate_id, provider=provider, error=service_privacy.public_error(str(exc), "提交结果未知。"))
                         submit_errors.append(f"Segment {futures[future]['segment'].get('segmentId')} submit失败：{exc}")
                         continue
                     segment = plan["segment"]
@@ -331,13 +342,14 @@ def main() -> int:
                         results.append(future.result())
                     except service_privacy.AuthorizationUnavailableError:
                         raise
-                    except (OSError, ValueError, local_video_cli.LocalVideoCliError) as exc:
+                    except (OSError, ValueError, local_video_cli.LocalVideoCliError, server_video_analysis.AnalysisError) as exc:
                         results.append({
                             "ok": False,
                             "reused": False,
                             "segment": plan["segment"],
                             "taskId": plan["taskId"],
-                            "error": str(exc),
+                            "error": service_privacy.public_error(str(exc), "任务查询失败。"),
+                            "terminalFailed": isinstance(exc, local_video_cli.TaskFailedError),
                         })
 
         results.sort(key=lambda item: int(item["segment"]["segmentId"]))
@@ -351,7 +363,7 @@ def main() -> int:
                 )
             else:
                 generation_manifest.set_video(
-                    manifest_path, segment_id, "failed", candidateId=candidate_id,
+                    manifest_path, segment_id, "terminal_failed" if item.get("terminalFailed") else "querying", candidateId=candidate_id,
                     taskId=item["taskId"], provider=provider, error=item["error"],
                     model=model, resolution=resolution,
                 )
@@ -418,8 +430,12 @@ def main() -> int:
         return 0
     except service_privacy.AuthorizationUnavailableError as exc:
         raise SystemExit(str(exc)) from None
-    except (OSError, ValueError, RuntimeError, KeyError, json.JSONDecodeError, local_video_cli.LocalVideoCliError) as exc:
+    except (OSError, ValueError, RuntimeError, KeyError, json.JSONDecodeError, local_video_cli.LocalVideoCliError, server_video_analysis.AnalysisError) as exc:
         raise SystemExit(str(exc)) from None
+
+    finally:
+        if lock_handle is not None:
+            server_video_analysis.release_run_lock(lock_handle)
 
 
 if __name__ == "__main__":

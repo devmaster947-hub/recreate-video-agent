@@ -17,9 +17,9 @@ Designed for:
 
 AI agent system for analyzing and recreating viral short videos.
 
-Current workflow: **V5.1 Identity Bindings**; SkillHub package version: **1.1.1**. It uses server-side semantic analysis and a deterministic segment plan, extracts one 3×3 source-frame storyboard per segment, supports product and creator replacement, prefers the agent's native image capability with Lingzhi `gpt-image-2` 1K as fallback, and selects video CLIs in the order LibTV, Xiaoyunque, Dreamina, then Lingzhi.
+Current workflow: **V5.1 Identity Bindings**; SkillHub package version: **1.1.5**. Analysis, image editing, and video generation use LuluLab CLI: RecreateVideoPromptV3, ImageGenV2 (`gpt-image-2-5-sunburst`, 1K), and VideoGenV2 (Seedance2 Mini, 720p). Each segment uses one 3×3 source-frame storyboard and supports product and creator replacement, task recovery, and duplicate-submission protection.
 
-See the [installation and usage guide](skills/recreate-video-agent/README.md) and [skill instructions](skills/recreate-video-agent/SKILL.md). Requires a Lingzhi API key and a compatible `recreate-video-prompt` server workflow; installing the skill does not deploy that backend.
+See the [installation and usage guide](skills/recreate-video-agent/README.md) and [skill instructions](skills/recreate-video-agent/SKILL.md). Requires a LuluLab API key, Python 3, FFmpeg, and FFprobe. The package includes LuluLab CLI for macOS arm64 and Windows x64; workflows are triggered by the CLI.
 
 Capabilities:
 
@@ -101,7 +101,7 @@ Output:
 
 For production-scale AI marketing video creation:
 
-**Lingzhi AI Studio**
+**LuluLab**
 
 
 
@@ -127,9 +127,9 @@ For production-scale AI marketing video creation:
 
 用于爆款短视频分析与复刻的 AI Agent 系统。
 
-当前工作流：**V5.1 Identity Bindings**；SkillHub 包版本：**1.1.1**。通过服务端语义拆解和确定性 Segment 规划，为每段抽取一张 3×3 真实帧 Storyboard，支持替换商品与达人，图片优先使用智能体原生能力并以灵智 `gpt-image-2` 1K 兜底，视频按 LibTV、小云雀、即梦、灵智工坊的顺序自动选择首个可用 CLI。
+当前工作流：**V5.1 Identity Bindings**；SkillHub 包版本：**1.1.5**。拆解、图片编辑和视频生成统一使用 LuluLab CLI：RecreateVideoPromptV3、ImageGenV2（`gpt-image-2-5-sunburst`，1K）和 VideoGenV2（Seedance2 Mini，720p）。每段使用一张 3×3 真实帧 Storyboard，支持商品与达人替换、任务恢复和防重复提交。
 
-查看[安装与使用说明](skills/recreate-video-agent/README.md)和[完整技能规则](skills/recreate-video-agent/SKILL.md)。使用时需要灵智 API Key 和兼容的 `recreate-video-prompt` 服务端工作流；安装技能不会自动部署服务端。
+查看[安装与使用说明](skills/recreate-video-agent/README.md)和[完整技能规则](skills/recreate-video-agent/SKILL.md)。需要 LuluLab API Key、Python 3、FFmpeg 和 FFprobe；包内置 macOS arm64 与 Windows x64 的 LuluLab CLI，工作流由 CLI 自动触发。
 
 核心能力：
 
@@ -211,4 +211,4 @@ AI 视频生成
 
 面向企业和商业场景的 AI 营销视频生产平台：
 
-**Lingzhi AI Studio**
+**LuluLab**

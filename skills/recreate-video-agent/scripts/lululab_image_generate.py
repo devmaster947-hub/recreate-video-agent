@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate or edit one image through Lingzhi CLI when native image capability is absent."""
+"""Generate or edit one image through LuluLab CLI through the configured ImageGenV2 workflow."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Any
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SKILL_ROOT))
 
-from scripts import local_video_cli, service_privacy  # noqa: E402
+from scripts import local_video_cli, service_privacy, server_video_analysis  # noqa: E402
 
 
 def write_report(path: Path, value: dict[str, Any]) -> None:
@@ -37,7 +37,7 @@ def read_prompt(args: argparse.Namespace) -> str:
     return value.strip()
 
 
-def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
+def _execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     report_path = Path(args.report).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
     prompt = read_prompt(args)
@@ -57,16 +57,22 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             raise ValueError("该输出已有提交记录；只能恢复原任务，禁止重复提交。")
 
     if not task_id:
+        try:
+            local_video_cli.image_workflow_id()
+        except local_video_cli.LocalVideoCliError as exc:
+            raise ValueError(str(exc)) from None
+
+    if not task_id:
         write_report(report_path, {
             "status": "submit_pending",
             "taskId": "",
-            "provider": "lingzhi_cli",
-            "model": local_video_cli.LINGZHI_IMAGE_MODEL_ID,
-            "resolution": local_video_cli.LINGZHI_IMAGE_RESOLUTION,
+            "provider": "lululab_cli",
+            "model": local_video_cli.LULULAB_IMAGE_MODEL_ID,
+            "resolution": local_video_cli.LULULAB_IMAGE_RESOLUTION,
             "output": str(output_path),
         })
         try:
-            task_id = local_video_cli.submit_lingzhi_image(
+            task_id = local_video_cli.submit_lululab_image(
                 prompt,
                 reference_files=references,
                 aspect_ratio=args.aspect_ratio,
@@ -75,51 +81,62 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             return 3, {
                 "status": "submit_outcome_unknown",
                 "taskId": "",
-                "provider": "lingzhi_cli",
-                "model": local_video_cli.LINGZHI_IMAGE_MODEL_ID,
-                "resolution": local_video_cli.LINGZHI_IMAGE_RESOLUTION,
-                "message": service_privacy.public_error(str(exc), "灵智图片提交失败。"),
+                "provider": "lululab_cli",
+                "model": local_video_cli.LULULAB_IMAGE_MODEL_ID,
+                "resolution": local_video_cli.LULULAB_IMAGE_RESOLUTION,
+                "message": service_privacy.public_error(str(exc), "LuluLab图片提交失败。"),
             }
         write_report(report_path, {
             "status": "submitted",
             "taskId": task_id,
-            "provider": "lingzhi_cli",
-            "model": local_video_cli.LINGZHI_IMAGE_MODEL_ID,
-            "resolution": local_video_cli.LINGZHI_IMAGE_RESOLUTION,
+            "provider": "lululab_cli",
+            "model": local_video_cli.LULULAB_IMAGE_MODEL_ID,
+            "resolution": local_video_cli.LULULAB_IMAGE_RESOLUTION,
             "output": str(output_path),
         })
 
     try:
-        raw = local_video_cli.poll_task(local_video_cli.fetch_lingzhi_image, task_id, timeout=1800)
+        raw = local_video_cli.poll_task(local_video_cli.fetch_lululab_image, task_id, timeout=1800)
         media = local_video_cli.media(raw, "image/png")
         saved = local_video_cli.download_media(media, output_path)
     except local_video_cli.TaskFailedError as exc:
         return 2, {
             "status": "terminal_failed",
             "taskId": task_id,
-            "provider": "lingzhi_cli",
-            "model": local_video_cli.LINGZHI_IMAGE_MODEL_ID,
-            "resolution": local_video_cli.LINGZHI_IMAGE_RESOLUTION,
+            "provider": "lululab_cli",
+            "model": local_video_cli.LULULAB_IMAGE_MODEL_ID,
+            "resolution": local_video_cli.LULULAB_IMAGE_RESOLUTION,
             "message": str(exc),
         }
     except (local_video_cli.LocalVideoCliError, service_privacy.AuthorizationUnavailableError) as exc:
         return 3, {
             "status": "poll_unknown",
             "taskId": task_id,
-            "provider": "lingzhi_cli",
-            "model": local_video_cli.LINGZHI_IMAGE_MODEL_ID,
-            "resolution": local_video_cli.LINGZHI_IMAGE_RESOLUTION,
-            "message": service_privacy.public_error(str(exc), "灵智图片任务查询失败。"),
+            "provider": "lululab_cli",
+            "model": local_video_cli.LULULAB_IMAGE_MODEL_ID,
+            "resolution": local_video_cli.LULULAB_IMAGE_RESOLUTION,
+            "message": service_privacy.public_error(str(exc), "LuluLab图片任务查询失败。"),
         }
     return 0, {
         "status": "success",
         "taskId": task_id,
-        "provider": "lingzhi_cli",
-        "model": local_video_cli.LINGZHI_IMAGE_MODEL_ID,
-        "resolution": local_video_cli.LINGZHI_IMAGE_RESOLUTION,
+        "provider": "lululab_cli",
+        "model": local_video_cli.LULULAB_IMAGE_MODEL_ID,
+        "resolution": local_video_cli.LULULAB_IMAGE_RESOLUTION,
         "output": str(saved),
         "media": media,
     }
+
+
+def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
+    report = Path(args.report).expanduser().resolve()
+    lock = server_video_analysis.acquire_run_lock(report, lock_path=report.with_suffix(report.suffix + ".lock"))
+    try:
+        code, result = _execute(args)
+        write_report(report, result)
+        return code, result
+    finally:
+        server_video_analysis.release_run_lock(lock)
 
 
 def main() -> int:
@@ -136,11 +153,9 @@ def main() -> int:
     report_path = Path(args.report).expanduser().resolve()
     try:
         code, report = execute(args)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, json.JSONDecodeError, server_video_analysis.AnalysisError) as exc:
         report = {"status": "invalid_input", "taskId": "", "message": str(exc)}
         code = 1
-    if not (report_path.is_file() and report.get("status") == "invalid_input"):
-        write_report(report_path, report)
     print(json.dumps(report, ensure_ascii=False))
     return code
 

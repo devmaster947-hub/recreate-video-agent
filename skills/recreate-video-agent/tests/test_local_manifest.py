@@ -20,7 +20,9 @@ class LocalManifestTests(unittest.TestCase):
                 type("Args", (), {"output_root": td, "task_id": "task", "reuse": False})()
             )
             data = generation_manifest.load_manifest(manifest)
-            self.assertEqual(data["userConfig"]["imageProvider"], "agent_local")
+            self.assertEqual(data["userConfig"]["imageProvider"], "lululab_cli")
+            self.assertEqual(data["userConfig"]["videoModel"], "seedance-2-mini")
+            self.assertEqual(data["userConfig"]["videoProvider"], "lululab_cli")
             self.assertEqual(data["videoBlueprint"]["source"], "local_agent")
             self.assertEqual(data["videoGeneration"]["status"], "not_started")
 

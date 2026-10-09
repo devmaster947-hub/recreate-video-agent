@@ -83,6 +83,7 @@ class RunGenerationSkipTests(unittest.TestCase):
             board.write_bytes(b"board")
             data = generation_manifest.load_manifest(manifest)
             data["userConfig"]["duration"] = 10
+            data["userConfig"]["videoProvider"] = "auto"
             data["storyboards"]["generation"] = [{
                 "storyboardId": 1, "segmentId": 1, "file": str(board), "layout": "3x3",
                 "globalStart": 0, "globalEnd": 10, "localStart": 0, "localEnd": 10,
@@ -96,13 +97,14 @@ class RunGenerationSkipTests(unittest.TestCase):
             data["videoPrompts"] = {"file": str(prompts), "segments": json.loads(prompts.read_text())["videoPrompts"]["segments"]}
             generation_manifest.save_manifest(manifest, data)
 
-            argv = ["run_generation.py", "--manifest", str(manifest)]
+            argv = ["run_generation.py", "--manifest", str(manifest), "--video-provider", "dreamina_cli"]
             with patch.object(sys, "argv", argv), patch.object(
                 run_generation.local_video_cli,
                 "detect_video_providers",
-                return_value={"dreamina_cli": False, "xiaoyunque_cli": False, "lingzhi_cli": False},
+                return_value={"dreamina_cli": False, "xiaoyunque_cli": False, "lululab_cli": False},
             ):
-                self.assertEqual(run_generation.main(), 0)
+                with self.assertRaisesRegex(SystemExit, "渠道不可用"):
+                    run_generation.main()
             saved = generation_manifest.load_manifest(manifest)
             self.assertEqual(saved["videoGeneration"]["status"], "skipped_no_local_cli")
             self.assertFalse(saved["videoGeneration"]["generated"])

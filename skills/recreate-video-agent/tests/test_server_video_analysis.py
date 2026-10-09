@@ -71,7 +71,7 @@ class ServerVideoAnalysisTests(unittest.TestCase):
     def test_windows_x64_uses_bundled_cli(self) -> None:
         path = bundled_cli_candidate("Windows", "AMD64")
         self.assertIsNotNone(path)
-        self.assertEqual(path.name, "lzstudio.exe")
+        self.assertEqual(path.name, "lululab.exe")
         self.assertTrue(path.is_file())
 
     def test_run_lock_rejects_second_process_for_same_manifest(self) -> None:

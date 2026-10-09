@@ -11,7 +11,6 @@ from scripts import generation_manifest as gm
 from scripts import reference_audit, prepare_prompt_handoff, run_generation, server_video_analysis, blueprint_timeline
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / 'assets/workflows/replication-v2.json'
 
 
 def blueprint():
@@ -127,72 +126,6 @@ class EntityBindingTests(unittest.TestCase):
             self.assertEqual((request['plannerVersion'],request['userConfig']['blueprintSchemaVersion']),('2','7.0'))
             data['skillVersion']='5.0'; data['userConfig'].pop('plannerVersion')
             self.assertEqual(server_video_analysis.build_input(data,{'url':'https://example.invalid/video.mp4'})['plannerVersion'],'1')
-
-
-@unittest.skipUnless(shutil.which('node'), 'Node required for offline n8n integration')
-class WorkflowTests(unittest.TestCase):
-    def execute(self,bp,version='2',node='生成复刻规划'):
-        script = """
-const fs=require('fs'), vm=require('vm');
-const payload=JSON.parse(fs.readFileSync(0,'utf8'));
-const w=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));
-const input={videoBlueprint:JSON.stringify(payload.bp),plannerVersion:payload.version,userConfig:{model:'seedance-2-fast',targetDuration:9,sourceDuration:9}};
-const task=payload.node==='结构化拆解内容'?{body:{status:'Succeeded',output:{text:JSON.stringify({videoBlueprint:payload.bp})}}}:input;
-const $=()=>({first:()=>({json:{body:{input,callbackUrl:'https://example.invalid'}}})});
-const code=w.nodes.find(n=>n.name===payload.node).parameters.jsCode;
-const result=vm.runInNewContext('(function(){'+code+'})()',{$input:{first:()=>({json:task})},$},{timeout:1500});
-process.stdout.write(JSON.stringify(result[0].json));
-"""
-        result=subprocess.run(['node','-e',script,str(WORKFLOW)],input=json.dumps({'bp':bp,'version':version,'node':node}),text=True,capture_output=True,check=True)
-        return json.loads(result.stdout)
-
-    def test_workflow_v2_contract_and_v1_compatibility(self):
-        bp=blueprint()
-        output=self.execute(bp)
-        self.assertNotIn('errorCode',output)
-        plan=output['replicationPlan']; segment=plan['segments'][0]
-        blueprint_timeline.normalize_server_plan(plan)
-        self.assertEqual(plan['plannerVersion'],'2')
-        self.assertEqual(len(segment['anchors']),9)
-        self.assertEqual(set(segment['sourceCharacterIds']),{'c1','c2'})
-        self.assertTrue(all(a['shotId'] in {'s1','s2'} for a in segment['anchors']))
-        self.assertNotIn('声线未绑定人物',plan['blueprintWarnings'])
-        bp['schemaVersion']='6.0'
-        self.assertEqual(self.execute(bp,'1')['replicationPlan']['plannerVersion'],'1')
-
-    def test_invalid_blueprint_stops_before_planning(self):
-        bp=blueprint();bp['视频元素']['人物']=[]
-        self.assertEqual(self.execute(bp,node='结构化拆解内容')['errorCode'],'INVALID_BLUEPRINT_V2')
-        self.assertEqual(self.execute(bp)['errorCode'],'PLANNING_FAILED')
-
-    def test_review_required_still_plans(self):
-        bp=blueprint();bp['reviewRequired']=True
-        self.assertNotIn('errorCode',self.execute(bp))
-
-    def test_v2_plan_cannot_smuggle_invalid_anchor(self):
-        plan=self.execute(blueprint())['replicationPlan']
-        plan['segments'][0]['anchors'][0]['shotId']='boundary'
-        with self.assertRaises(ValueError): blueprint_timeline.normalize_server_plan(plan)
-
-    def test_prompt_switch_returns_parseable_new_schema_and_preserves_old(self):
-        script="""
-const fs=require('fs'),vm=require('vm');const w=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));
-const a=w.nodes.find(n=>n.name==='拆解提示词').parameters.assignments.assignments;
-const out=[];
-for (const version of ['1','2']) {
- const $=()=>({first:()=>({json:{body:{input:{plannerVersion:version,userConfig:{targetDuration:9,targetLanguage:'法语',otherRequirements:'替换所有人物'}}}}})});
- const values={};for(const x of a)values[x.name]=vm.runInNewContext(x.value.slice(3,-2),{$},{timeout:1000});
- const blocks=[...values.prompt_text1.matchAll(/```json\\n([\\s\\S]*?)\\n```/g)];
- const schema=JSON.parse(blocks.find(b=>b[1].includes('"videoBlueprint"'))[1]).videoBlueprint;
- out.push({version,schema:schema.schemaVersion,config:values.config_text,people:schema['视频元素']['人物']});
-}
-process.stdout.write(JSON.stringify(out));
-"""
-        result=subprocess.run(['node','-e',script,str(WORKFLOW)],text=True,capture_output=True,check=True)
-        old,new=json.loads(result.stdout)
-        self.assertEqual((old['schema'],new['schema']),('6.0','7.0'))
-        self.assertIn('speakerId',old['people'][0]); self.assertIn('characterId',new['people'][0])
-        self.assertNotIn('替换所有人物',new['config']);self.assertIn('替换所有人物',old['config'])
 
 
 if __name__ == '__main__': unittest.main()

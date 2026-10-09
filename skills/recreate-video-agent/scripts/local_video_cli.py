@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Video CLI discovery plus Dreamina, Xiaoyunque, and Lingzhi generation helpers."""
+"""Video CLI discovery plus Dreamina, Xiaoyunque, and LuluLab generation helpers."""
 
 from __future__ import annotations
 
@@ -28,11 +28,13 @@ PENDING_STATES = {
     "created", "pending", "processing", "running", "queued", "submitted", "generating", "querying",
 }
 SUCCESS_STATES = {"succeeded", "success", "completed", "complete"}
-FAILED_STATES = {"failed", "failure", "fail", "error", "cancelled", "canceled"}
-VIDEO_PROVIDERS = {"auto", "dreamina_cli", "xiaoyunque_cli", "lingzhi_cli"}
-GENERATION_PROVIDER_ORDER = ("libtv_cli", "xiaoyunque_cli", "dreamina_cli", "lingzhi_cli")
-LINGZHI_IMAGE_MODEL_ID = "gpt-image-2"
-LINGZHI_IMAGE_RESOLUTION = "1K"
+FAILED_STATES = {"failed", "failure", "fail", "error", "cancelled", "canceled", "timeout", "timed_out"}
+VIDEO_PROVIDERS = {"auto", "dreamina_cli", "xiaoyunque_cli", "lululab_cli"}
+GENERATION_PROVIDER_ORDER = ("libtv_cli", "xiaoyunque_cli", "dreamina_cli")
+LULULAB_IMAGE_MODEL_ID = "gpt-image-2-5-sunburst"
+LULULAB_IMAGE_WORKFLOW_ID = "ImageGenV2"
+LULULAB_VIDEO_WORKFLOW_ID = "VideoGenV2"
+LULULAB_IMAGE_RESOLUTION = "1K"
 
 DREAMINA_VIDEO_MODEL_IDS = {
     key: str(value["dreaminaId"])
@@ -114,24 +116,24 @@ def resolve_libtv_cli(*, cli_path: str | os.PathLike[str] | None = None) -> Path
     return _resolve_executable(names, configured=configured, cli_path=cli_path)
 
 
-def resolve_lingzhi_cli(*, cli_path: str | os.PathLike[str] | None = None) -> Path:
+def resolve_lululab_cli(*, cli_path: str | os.PathLike[str] | None = None) -> Path:
     if cli_path:
         candidate = Path(cli_path).expanduser().resolve()
     else:
-        configured = os.environ.get("LZSTUDIO_CLI", "").strip()
+        configured = os.environ.get("LULULAB_CLI", "").strip()
         if configured:
             candidate = Path(configured).expanduser().resolve()
         else:
             architecture = platform.machine().lower()
             bundled: Path | None = None
             if platform.system() == "Darwin" and architecture in {"arm64", "aarch64"}:
-                bundled = SKILL_ROOT / "cli" / "macos-arm64" / "lzstudio"
+                bundled = SKILL_ROOT / "cli" / "macos-arm64" / "lululab"
             elif platform.system() == "Windows" and architecture in {"amd64", "x86_64", "x64"}:
-                bundled = SKILL_ROOT / "cli" / "windows-x64" / "lzstudio.exe"
-            discovered = shutil.which("lzstudio") or shutil.which("lzstudio.exe")
+                bundled = SKILL_ROOT / "cli" / "windows-x64" / "lululab.exe"
+            discovered = shutil.which("lululab") or shutil.which("lululab.exe")
             candidate = bundled if bundled and bundled.is_file() else Path(discovered).resolve() if discovered else Path()
     if not candidate.is_file() or candidate.stat().st_size <= 0:
-        raise LocalVideoCliError("未发现可执行 CLI：lzstudio")
+        raise LocalVideoCliError("未发现可执行 CLI：lululab")
     if platform.system() != "Windows" and not os.access(candidate, os.X_OK):
         raise LocalVideoCliError(f"CLI 不可执行：{candidate}")
     return candidate.resolve()
@@ -150,28 +152,20 @@ def libtv_cli_available(*, cli_path: str | os.PathLike[str] | None = None) -> bo
     return completed.returncode == 0
 
 
-def lingzhi_cli_available(*, cli_path: str | os.PathLike[str] | None = None) -> bool:
+LULULAB_GENERATION_UNAVAILABLE = "未发现支持 task submit/fetch 的 LuluLab CLI。"
+
+
+def lululab_cli_available(*, cli_path: str | os.PathLike[str] | None = None) -> bool:
     try:
-        executable = resolve_lingzhi_cli(cli_path=cli_path)
-        submit = subprocess.run(
-            [str(executable), "video", "submit", "--help"],
-            check=False, capture_output=True, text=True, timeout=30,
-        )
-        fetch = subprocess.run(
-            [str(executable), "video", "fetch", "--help"],
-            check=False, capture_output=True, text=True, timeout=30,
-        )
+        executable = resolve_lululab_cli(cli_path=cli_path)
+        for command, required in (("submit", ("--workflow-id", "--input")), ("fetch", ("--id",))):
+            result = subprocess.run([str(executable), "task", command, "--help"], capture_output=True, text=True, timeout=30)
+            text = result.stdout + result.stderr
+            if result.returncode != 0 or not all(flag in text for flag in required):
+                return False
+        return True
     except (LocalVideoCliError, OSError, subprocess.SubprocessError):
         return False
-    submit_text = f"{submit.stdout}\n{submit.stderr}"
-    fetch_text = f"{fetch.stdout}\n{fetch.stderr}"
-    required = ("--model", "--prompt", "--duration", "--aspect-ratio", "--resolution", "--reference-images")
-    return (
-        submit.returncode == 0
-        and fetch.returncode == 0
-        and all(token in submit_text for token in required)
-        and "--id" in fetch_text
-    )
 
 
 def _run(executable: Path, arguments: Sequence[str], *, provider: str, timeout: float = 600.0) -> Any:
@@ -200,12 +194,12 @@ def _run(executable: Path, arguments: Sequence[str], *, provider: str, timeout: 
     return parsed
 
 
-def load_lingzhi_key() -> str:
-    for name in ("LZSTUDIO_API_KEY", "RECREATE_VIDEO_API_KEY"):
+def load_lululab_key() -> str:
+    for name in ("LULULAB_API_KEY",):
         value = os.environ.get(name, "").strip()
         if value:
             return value
-    config = Path.home() / ".recreate-video" / "config.json"
+    config = Path.home() / ".recreate-video-lululab" / "config.json"
     if config.is_file():
         try:
             value = json.loads(config.read_text(encoding="utf-8")).get("apiKey", "")
@@ -213,39 +207,44 @@ def load_lingzhi_key() -> str:
             value = ""
         if isinstance(value, str) and value.strip():
             return value.strip()
-    raise LocalVideoCliError("本机未配置灵智工坊 API Key。")
+    raise LocalVideoCliError("本机未配置LuluLab API Key。")
 
 
-def run_lingzhi_cli(
+def run_lululab_cli(
     arguments: Sequence[str],
     *,
     cli_path: str | os.PathLike[str] | None = None,
     timeout: float = 600.0,
 ) -> Any:
-    normalized = list(map(str, arguments))
-    if len(normalized) < 2 or normalized[0] not in {"image", "video"}:
-        raise LocalVideoCliError("灵智工坊生成命令必须是 image/video submit/fetch。")
-    executable = resolve_lingzhi_cli(cli_path=cli_path)
-    key = load_lingzhi_key()
-    command = [str(executable), *normalized[:2], "--api-key", key, *normalized[2:]]
+    """Use only the documented LuluLab task/upload/user interface."""
     try:
-        completed = subprocess.run(
-            command, text=True, capture_output=True, check=False, timeout=timeout, shell=False,
-        )
-    except subprocess.TimeoutExpired:
-        raise LocalVideoCliError(f"灵智工坊 CLI 调用超时（{timeout:g} 秒）。") from None
-    except OSError as exc:
-        raise LocalVideoCliError(f"无法启动灵智工坊 CLI：{exc}") from None
-    if completed.returncode != 0:
-        detail = (completed.stderr.strip() or completed.stdout.strip() or "未知错误").replace(key, "[REDACTED]")
-        service_privacy.raise_if_authorization_unavailable(detail)
-        raise LocalVideoCliError(
-            f"灵智工坊 CLI 退出码 {completed.returncode}："
-            f"{service_privacy.public_error(detail[:1000], '未知错误')}"
-        )
-    parsed = _parse_json(completed.stdout, "灵智工坊")
-    service_privacy.raise_if_authorization_unavailable(parsed)
-    return parsed
+        from scripts import server_video_analysis as analysis
+    except ModuleNotFoundError:
+        import server_video_analysis as analysis
+    values = list(map(str, arguments))
+    if not values or values[0] not in {"task", "upload", "user"}:
+        raise LocalVideoCliError(LULULAB_GENERATION_UNAVAILABLE)
+    try:
+        executable = resolve_lululab_cli(cli_path=cli_path)
+        return analysis.run_cli(str(executable), load_lululab_key(), values, timeout)
+    except analysis.AnalysisError as exc:
+        raise LocalVideoCliError(str(exc)) from None
+
+
+def image_workflow_id() -> str:
+    """Use the ImageGenV2 contract extracted from the original bundled CLI."""
+    return os.environ.get("LULULAB_IMAGE_WORKFLOW_ID", "").strip() or LULULAB_IMAGE_WORKFLOW_ID
+
+
+def video_workflow_id() -> str:
+    """Use the VideoGenV2 contract extracted from the original bundled CLI."""
+    return os.environ.get("LULULAB_VIDEO_WORKFLOW_ID", "").strip() or LULULAB_VIDEO_WORKFLOW_ID
+
+
+def upload_reference_images(files: Iterable[Path]) -> list[dict[str, Any]]:
+    return [media(run_lululab_cli(["upload", str(path)]),
+                  "image/jpeg" if path.suffix.lower() in {".jpg", ".jpeg"} else "image/png")
+            for path in files]
 
 
 def run_dreamina_cli(arguments: Sequence[str], *, cli_path: str | os.PathLike[str] | None = None, timeout: float = 600.0) -> Any:
@@ -318,13 +317,13 @@ def detect_video_providers(model: str | None = None) -> dict[str, bool]:
         xiaoyunque = True
     except LocalVideoCliError:
         xiaoyunque = False
-    lingzhi = lingzhi_cli_available()
+    lululab = lululab_cli_available()
     if model:
         if dreamina and not dreamina_cli_supports_video_model(model):
             dreamina = False
         if xiaoyunque and not xiaoyunque_cli_supports_video_model(model):
             xiaoyunque = False
-    return {"dreamina_cli": dreamina, "xiaoyunque_cli": xiaoyunque, "lingzhi_cli": lingzhi}
+    return {"dreamina_cli": dreamina, "xiaoyunque_cli": xiaoyunque, "lululab_cli": lululab}
 
 
 def detect_generation_providers(model: str | None = None) -> dict[str, bool]:
@@ -334,7 +333,7 @@ def detect_generation_providers(model: str | None = None) -> dict[str, bool]:
         "libtv_cli": libtv_cli_available(),
         "xiaoyunque_cli": local["xiaoyunque_cli"],
         "dreamina_cli": local["dreamina_cli"],
-        "lingzhi_cli": local["lingzhi_cli"],
+        "lululab_cli": local["lululab_cli"],
     }
 
 
@@ -346,7 +345,7 @@ def resolve_generation_provider(*, availability: Mapping[str, bool] | None = Non
 def resolve_video_provider(video_provider: str = "auto", *, availability: Mapping[str, bool] | None = None) -> str | None:
     provider = str(video_provider).strip().lower()
     if provider not in VIDEO_PROVIDERS:
-        raise LocalVideoCliError("videoProvider 必须是 auto、dreamina_cli、xiaoyunque_cli 或 lingzhi_cli。")
+        raise LocalVideoCliError("videoProvider 必须是 auto、dreamina_cli、xiaoyunque_cli 或 lululab_cli。")
     channels = dict(availability or detect_video_providers())
     if provider != "auto":
         if not channels.get(provider, False):
@@ -356,14 +355,14 @@ def resolve_video_provider(video_provider: str = "auto", *, availability: Mappin
         return "xiaoyunque_cli"
     if channels.get("dreamina_cli"):
         return "dreamina_cli"
-    if channels.get("lingzhi_cli"):
-        return "lingzhi_cli"
+    if channels.get("lululab_cli"):
+        return "lululab_cli"
     return None
 
 
 def _provider_model_id(provider: str, model: str) -> str:
     model_id = _model_id(model)
-    if provider == "lingzhi_cli":
+    if provider == "lululab_cli":
         return model_id
     mapping = DREAMINA_VIDEO_MODEL_IDS if provider == "dreamina_cli" else XIAOYUNQUE_VIDEO_MODEL_IDS
     provider_id = mapping.get(model_id)
@@ -398,70 +397,73 @@ def submit_video(
     aspect_ratio: str = "9:16",
     resolution: str = "720p",
 ) -> str:
-    if provider not in {"dreamina_cli", "xiaoyunque_cli", "lingzhi_cli"}:
+    if provider not in {"dreamina_cli", "xiaoyunque_cli", "lululab_cli"}:
         raise LocalVideoCliError(f"未知本地视频 provider：{provider}")
     if not isinstance(prompt, str) or not prompt.strip():
         raise LocalVideoCliError("视频 Prompt 不能为空。")
     checked = validate_generation(_model_id(model), duration, resolution)
     files = _reference_files(reference_files, int(checked.get("maxImages", 9)))
     model_id = _provider_model_id(provider, model)
-    if provider == "lingzhi_cli":
-        arguments = [
-            "video", "submit", "--model", model_id, "--prompt", prompt.strip(),
-            "--duration", str(int(checked["duration"])), "--aspect-ratio", aspect_ratio,
-            "--resolution", resolution,
-        ]
-        for path in files:
-            arguments.extend(["--reference-images", str(path)])
-        value = run_lingzhi_cli(arguments)
-    else:
-        command = "multimodal2video" if files else "text2video"
-        arguments = [
-            command,
-            "--prompt", prompt.strip(),
-            "--duration", str(int(checked["duration"])),
-            "--ratio", aspect_ratio,
-            "--video_resolution", resolution,
-            "--model_version", model_id,
-        ]
-        for path in files:
-            arguments.extend(["--image", str(path)])
-        value = run_dreamina_cli(arguments) if provider == "dreamina_cli" else run_xiaoyunque_cli(arguments)
+    if provider == "lululab_cli":
+        payload = {"model": model_id, "prompt": prompt.strip(),
+                   "duration": int(checked["duration"]), "aspectRatio": aspect_ratio,
+                   "resolution": resolution, "referenceImages": upload_reference_images(files)}
+        return _task_id(run_lululab_cli([
+            "task", "submit", "--workflow-id", video_workflow_id(),
+            "--input", json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        ]))
+    command = "multimodal2video" if files else "text2video"
+    arguments = [
+        command,
+        "--prompt", prompt.strip(),
+        "--duration", str(int(checked["duration"])),
+        "--ratio", aspect_ratio,
+        "--video_resolution", resolution,
+        "--model_version", model_id,
+    ]
+    for path in files:
+        arguments.extend(["--image", str(path)])
+    value = run_dreamina_cli(arguments) if provider == "dreamina_cli" else run_xiaoyunque_cli(arguments)
     return _task_id(value)
 
 
 def fetch_video(provider: str, task_id: str) -> Any:
     if not str(task_id).strip():
         raise LocalVideoCliError("任务 id 不能为空。")
-    if provider == "lingzhi_cli":
-        return run_lingzhi_cli(["video", "fetch", "--id", str(task_id).strip()], timeout=300)
+    if provider == "lululab_cli":
+        return run_lululab_cli(["task", "fetch", "--id", str(task_id).strip()], timeout=300)
     arguments = ["query_result", "--submit_id", str(task_id).strip()]
     return run_dreamina_cli(arguments, timeout=300) if provider == "dreamina_cli" else run_xiaoyunque_cli(arguments, timeout=300)
 
 
-def submit_lingzhi_image(
+def submit_lululab_image(
     prompt: str,
     *,
     reference_files: Iterable[str | os.PathLike[str]] | None = None,
     aspect_ratio: str = "9:16",
 ) -> str:
+    workflow = image_workflow_id()
     if not isinstance(prompt, str) or not prompt.strip():
         raise LocalVideoCliError("图片 Prompt 不能为空。")
     files = _reference_files(reference_files, 9)
-    arguments = [
-        "image", "submit", "--model", LINGZHI_IMAGE_MODEL_ID,
-        "--prompt", prompt.strip(), "--aspect-ratio", aspect_ratio,
-        "--resolution", LINGZHI_IMAGE_RESOLUTION,
-    ]
-    for path in files:
-        arguments.extend(["--reference-images", str(path)])
-    return _task_id(run_lingzhi_cli(arguments))
+    references = upload_reference_images(files)
+    payload = {
+        "model": LULULAB_IMAGE_MODEL_ID,
+        "prompt": prompt.strip(),
+        "resolution": LULULAB_IMAGE_RESOLUTION,
+        "aspectRatio": aspect_ratio,
+        "referenceImages": references,
+    }
+    return _task_id(run_lululab_cli([
+        "task", "submit", "--workflow-id", workflow,
+        "--input", json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    ]))
 
 
-def fetch_lingzhi_image(task_id: str) -> Any:
+def fetch_lululab_image(task_id: str) -> Any:
     if not str(task_id).strip():
         raise LocalVideoCliError("任务 id 不能为空。")
-    return run_lingzhi_cli(["image", "fetch", "--id", str(task_id).strip()], timeout=300)
+    return run_lululab_cli(["task", "fetch", "--id", str(task_id).strip()], timeout=300)
 
 
 def _unwrap(value: Any) -> Any:
@@ -500,7 +502,7 @@ def _http_url(value: Any) -> bool:
 def media(value: Any, default_mime: str = "video/mp4") -> dict[str, Any]:
     source = _output(value)
     if isinstance(source, dict):
-        for key in ("video", "media"):
+        for key in ("video", "image", "media"):
             if isinstance(source.get(key), (dict, str)):
                 source = source[key]
                 break
@@ -517,7 +519,7 @@ def media(value: Any, default_mime: str = "video/mp4") -> dict[str, Any]:
         if isinstance(urls, list) and urls:
             url = urls[0]
     if not _http_url(url):
-        queue = [value]
+        queue = [_output(value)]
         while queue and not _http_url(url):
             current = queue.pop(0)
             if isinstance(current, dict):
@@ -531,7 +533,7 @@ def media(value: Any, default_mime: str = "video/mp4") -> dict[str, Any]:
                 queue.extend(item for item in current if isinstance(item, (dict, list)))
     if not _http_url(url):
         raise LocalVideoCliError("fetch 响应缺少有效媒体 URL。")
-    return {"url": str(url).strip(), "mimeType": source.get("mimeType") or default_mime, "expiredAt": source.get("expiredAt") or ""}
+    return {"url": str(url).strip(), "mimeType": source.get("mimeType") or default_mime, "expiredAt": source.get("expiredAt") or source.get("expiresAt") or ""}
 
 
 def _state(value: Any) -> str:

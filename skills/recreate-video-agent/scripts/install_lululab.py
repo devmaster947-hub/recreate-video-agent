@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the bundled LZStudio CLI into the current user's application directory."""
+"""Install the bundled LuluLab CLI into the current user's application directory."""
 
 from __future__ import annotations
 
@@ -18,13 +18,13 @@ from typing import Mapping, Sequence
 
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
-PATH_BLOCK_START = "# >>> lzstudio managed path >>>"
-PATH_BLOCK_END = "# <<< lzstudio managed path <<<"
+PATH_BLOCK_START = "# >>> lululab managed path >>>"
+PATH_BLOCK_END = "# <<< lululab managed path <<<"
 EXPECTED_SHA256 = {
-    ("Darwin", "arm64"): "7af107fa2087782763fcfb7528aa8759326c9ca4b8a04c447b42fc55528b0e7d",
-    ("Windows", "amd64"): "f1c61d3fd5ec0ee5b6a58957494ff21cf220098e4350a4c2f89081f60bf55ab0",
-    ("Windows", "x86_64"): "f1c61d3fd5ec0ee5b6a58957494ff21cf220098e4350a4c2f89081f60bf55ab0",
-    ("Windows", "x64"): "f1c61d3fd5ec0ee5b6a58957494ff21cf220098e4350a4c2f89081f60bf55ab0",
+    ("Darwin", "arm64"): "4689fa8d5f69c2acebba8d78056692b027ce77730712709d5f9a359e2a0a2f3e",
+    ("Windows", "amd64"): "9ef8120990fff7b3fdc88c62119c385080945f834401227adcc712f176a27926",
+    ("Windows", "x86_64"): "9ef8120990fff7b3fdc88c62119c385080945f834401227adcc712f176a27926",
+    ("Windows", "x64"): "9ef8120990fff7b3fdc88c62119c385080945f834401227adcc712f176a27926",
 }
 
 
@@ -42,17 +42,17 @@ def bundled_cli_path(
     architecture = (machine or platform.machine()).lower()
     root = Path(skill_root).resolve() if skill_root else SKILL_ROOT
     if system_name == "Darwin" and architecture in {"arm64", "aarch64"}:
-        candidate = root / "cli" / "macos-arm64" / "lzstudio"
+        candidate = root / "cli" / "macos-arm64" / "lululab"
     elif system_name == "Windows" and architecture in {"amd64", "x86_64", "x64"}:
-        candidate = root / "cli" / "windows-x64" / "lzstudio.exe"
+        candidate = root / "cli" / "windows-x64" / "lululab.exe"
     else:
         raise InstallError("当前平台不支持，请使用 macOS Apple Silicon 或 Windows x64。")
     if not candidate.is_file() or candidate.stat().st_size <= 0:
-        raise InstallError(f"技能内置 LZStudio CLI 缺失：{candidate}")
+        raise InstallError(f"技能内置 LuluLab CLI 缺失：{candidate}")
     expected = EXPECTED_SHA256.get((system_name, architecture))
     actual = hashlib.sha256(candidate.read_bytes()).hexdigest()
     if not expected or actual != expected:
-        raise InstallError(f"技能内置 LZStudio CLI 校验失败：{candidate}")
+        raise InstallError(f"技能内置 LuluLab CLI 校验失败：{candidate}")
     return candidate
 
 
@@ -66,11 +66,11 @@ def default_install_dir(
     user_home = Path(home).expanduser() if home is not None else Path.home()
     environment = os.environ if environ is None else environ
     if system_name == "Darwin":
-        return (user_home / "Applications" / "LZStudio" / "bin").resolve()
+        return (user_home / "Applications" / "LuluLab" / "bin").resolve()
     if system_name == "Windows":
         local_app_data = environment.get("LOCALAPPDATA", "").strip()
         base = Path(local_app_data) if local_app_data else user_home / "AppData" / "Local"
-        return (base / "Programs" / "LZStudio" / "bin").resolve()
+        return (base / "Programs" / "LuluLab" / "bin").resolve()
     raise InstallError("当前平台不支持，请使用 macOS Apple Silicon 或 Windows x64。")
 
 
@@ -153,7 +153,7 @@ def _copy_atomic(source: Path, target: Path, *, system: str) -> None:
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            prefix=".lzstudio-install-", dir=target.parent, delete=False
+            prefix=".lululab-install-", dir=target.parent, delete=False
         ) as temporary:
             temporary_path = Path(temporary.name)
             with source.open("rb") as handle:
@@ -180,11 +180,11 @@ def verify_version(executable: Path, *, timeout: float = 30.0) -> str:
             env=os.environ.copy(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        raise InstallError(f"验收命令 `lzstudio --version` 无法启动：{exc}") from None
+        raise InstallError(f"验收命令 `lululab --version` 无法启动：{exc}") from None
     output = (completed.stdout.strip() or completed.stderr.strip()).strip()
     if completed.returncode != 0 or not output:
         raise InstallError(
-            f"验收命令 `lzstudio --version` 失败（退出码 {completed.returncode}）："
+            f"验收命令 `lululab --version` 失败（退出码 {completed.returncode}）："
             f"{output or '未返回版本信息'}"
         )
     try:
@@ -198,7 +198,7 @@ def verify_version(executable: Path, *, timeout: float = 30.0) -> str:
             env=os.environ.copy(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        raise InstallError(f"LZStudio task submit契约验证无法启动：{exc}") from None
+        raise InstallError(f"LuluLab task submit契约验证无法启动：{exc}") from None
     help_text = contract.stdout + contract.stderr
     if contract.returncode != 0 or "workflow-id" not in help_text or "--input" not in help_text:
         raise InstallError("内置CLI不支持必需的`task submit --workflow-id --input`契约。")
@@ -223,7 +223,7 @@ def ensure_installed(
         if install_dir is not None
         else default_install_dir(system=system_name, home=home)
     )
-    executable_name = "lzstudio.exe" if system_name == "Windows" else "lzstudio"
+    executable_name = "lululab.exe" if system_name == "Windows" else "lululab"
     target = destination_dir / executable_name
     if not target.is_file() or target.read_bytes() != source.read_bytes():
         _copy_atomic(source, target, system=system_name)
@@ -249,7 +249,7 @@ def ensure_installed(
     return {
         "installedPath": str(target),
         "pathUpdates": path_updates,
-        "acceptanceCommand": "lzstudio --version",
+        "acceptanceCommand": "lululab --version",
         "version": version,
     }
 

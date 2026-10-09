@@ -453,7 +453,7 @@ def normalize_replacement_record(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def command_init(args: argparse.Namespace) -> Path:
-    video_model = str(getattr(args, "video_model", "seedance-2-fast") or "seedance-2-fast")
+    video_model = str(getattr(args, "video_model", "seedance-2-mini") or "seedance-2-mini")
     duration_mode = str(getattr(args, "duration_mode", "source") or "source")
     target_duration = getattr(args, "target_duration", None)
     custom_requirement = str(getattr(args, "custom_requirement", "") or "")
@@ -503,8 +503,8 @@ def command_init(args: argparse.Namespace) -> Path:
                     "plannerVersion": "2",
                     "fidelityMode": "high_fidelity",
                     "peopleMode": "recreate",
-                    "imageProvider": "agent_local",
-                    "videoProvider": "auto",
+                    "imageProvider": "lululab_cli",
+                    "videoProvider": "lululab_cli",
                     "storyboardValidationMode": storyboard_validation_mode,
                 },
                 "storyboards": {"original": [], "edited": [], "generation": []},
@@ -1122,7 +1122,7 @@ def main() -> int:
     init.add_argument("--task-id", required=True)
     init.add_argument("--output-root", required=True)
     init.add_argument("--reuse", action="store_true")
-    init.add_argument("--video-model", default="seedance-2-fast")
+    init.add_argument("--video-model", default="seedance-2-mini")
     init.add_argument("--duration-mode", choices=("source", "custom"), default="source")
     init.add_argument("--target-duration", type=int)
     init.add_argument("--custom-requirement", default="")

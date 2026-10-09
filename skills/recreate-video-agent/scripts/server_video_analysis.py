@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Submit one benchmark video to RecreateVideoPromptV3 through LZStudio CLI."""
+"""Submit one benchmark video to RecreateVideoPromptV3 through LuluLab CLI."""
 
 from __future__ import annotations
 
@@ -25,11 +25,13 @@ except ImportError:  # POSIX
 
 try:
     from scripts import generation_manifest, service_privacy
-    from scripts.compress_benchmark_video import CompressionError, prepare_benchmark_video
+    from scripts.benchmark_preprocessing import prepare_analysis_video
+    from scripts.compress_benchmark_video import CompressionError
 except ModuleNotFoundError:
+    from benchmark_preprocessing import prepare_analysis_video
     import generation_manifest  # type: ignore[no-redef]
     import service_privacy  # type: ignore[no-redef]
-    from compress_benchmark_video import CompressionError, prepare_benchmark_video  # type: ignore[no-redef]
+    from compress_benchmark_video import CompressionError  # type: ignore[no-redef]
 
 
 WORKFLOW_ID = "RecreateVideoPromptV3"
@@ -45,9 +47,9 @@ class AnalysisError(RuntimeError):
     pass
 
 
-def acquire_run_lock(manifest_path: Path):
+def acquire_run_lock(manifest_path: Path, *, lock_path: Path | None = None):
     """Prevent two client processes from uploading/submitting the same manifest."""
-    lock_path = manifest_path.parent / "analysis" / "server-video-analysis.lock"
+    lock_path = lock_path or manifest_path.parent / "analysis" / "server-video-analysis.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("a+", encoding="utf-8")
     try:
@@ -65,7 +67,7 @@ def acquire_run_lock(manifest_path: Path):
     except (BlockingIOError, OSError):
         handle.close()
         raise AnalysisError(
-            "同一manifest已有服务端拆解进程在运行；必须继续等待该进程，禁止启动第二个上传或submit。"
+            "同一任务已有进程在运行；请继续原进程，禁止启动第二个上传或submit。"
         ) from None
     handle.seek(0)
     handle.truncate()
@@ -177,7 +179,7 @@ def parse_json_output(raw: str) -> dict[str, Any]:
             continue
         if isinstance(value, dict):
             return value
-    raise AnalysisError("LZStudio CLI返回内容不是JSON对象。")
+    raise AnalysisError("LuluLab CLI返回内容不是JSON对象。")
 
 
 def http_url(value: Any) -> bool:
@@ -205,7 +207,7 @@ def extract_media(response: Mapping[str, Any], mime_type: str) -> dict[str, Any]
             return {
                 "url": str(url).strip(),
                 "mimeType": mime_type,
-                "expiredAt": item.get("expiredAt") or None,
+                "expiredAt": item.get("expiredAt") or item.get("expiresAt") or None,
             }
     raise AnalysisError("upload响应缺少有效HTTP(S)媒体URL。")
 
@@ -284,38 +286,41 @@ def bundled_cli_candidate(system_name: str | None = None, machine: str | None = 
     system_value = system_name or platform.system()
     architecture = (machine or platform.machine()).lower()
     if system_value == "Windows" and architecture in {"amd64", "x86_64", "x64"}:
-        return Path(__file__).resolve().parent.parent / "cli" / "windows-x64" / "lzstudio.exe"
+        return Path(__file__).resolve().parent.parent / "cli" / "windows-x64" / "lululab.exe"
     if system_value == "Darwin" and architecture in {"arm64", "aarch64"}:
-        return Path(__file__).resolve().parent.parent / "cli" / "macos-arm64" / "lzstudio"
+        return Path(__file__).resolve().parent.parent / "cli" / "macos-arm64" / "lululab"
     return None
 
 
 def resolve_cli(explicit: str | None) -> str:
     bundled = bundled_cli_candidate()
-    candidates = [explicit, os.environ.get("LZSTUDIO_CLI"), shutil.which("lzstudio"), shutil.which("lzstudio.exe"), bundled]
+    candidates = [explicit, os.environ.get("LULULAB_CLI"), bundled, shutil.which("lululab"), shutil.which("lululab.exe")]
     for value in candidates:
         if not value:
             continue
         path = Path(value).expanduser()
         if path.is_file() and os.access(path, os.X_OK):
-            completed = subprocess.run(
-                [str(path), "task", "submit", "--help"],
-                capture_output=True, text=True, check=False, timeout=30,
-            )
+            try:
+                completed = subprocess.run(
+                    [str(path), "task", "submit", "--help"],
+                    capture_output=True, text=True, check=False, timeout=30,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
             help_text = completed.stdout + completed.stderr
-            if "workflow-id" in help_text and "--input" in help_text:
+            if completed.returncode == 0 and "workflow-id" in help_text and "--input" in help_text:
                 return str(path.resolve())
     raise AnalysisError(
-        "未发现支持`task submit/fetch`的LZStudio CLI；请在本机升级CLI或设置LZSTUDIO_CLI。"
+        "未发现支持`task submit/fetch`的LuluLab CLI；请在本机升级CLI或设置LULULAB_CLI。"
     )
 
 
 def load_key() -> str:
-    for name in ("LZSTUDIO_API_KEY", "RECREATE_VIDEO_API_KEY"):
+    for name in ("LULULAB_API_KEY",):
         value = os.environ.get(name, "").strip()
         if value:
             return value
-    config = Path.home() / ".recreate-video" / "config.json"
+    config = Path.home() / ".recreate-video-lululab" / "config.json"
     if config.is_file():
         try:
             value = json.loads(config.read_text(encoding="utf-8")).get("apiKey", "")
@@ -324,8 +329,8 @@ def load_key() -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     raise AnalysisError(
-        "本机未配置灵智工坊 API Key；请前往 https://www.lingzhiai.com.cn/ 获取，"
-        "然后在本地环境设置LZSTUDIO_API_KEY或RECREATE_VIDEO_API_KEY。"
+        "本机未配置LuluLab API Key；请前往 https://customer.lululab.ai/ 获取，"
+        "然后在本地环境设置LULULAB_API_KEY。"
     )
 
 
@@ -337,23 +342,32 @@ def run_cli(cli: str, key: str, arguments: list[str], timeout: float) -> dict[st
             command, capture_output=True, text=True, check=False, timeout=timeout, shell=False,
         )
     except subprocess.TimeoutExpired:
-        raise AnalysisError(f"LZStudio CLI调用超时（{timeout:g}秒）。") from None
+        raise AnalysisError(f"LuluLab CLI调用超时（{timeout:g}秒）。") from None
     except OSError as exc:
-        raise AnalysisError(f"无法启动LZStudio CLI：{exc}") from None
+        raise AnalysisError(f"无法启动LuluLab CLI：{exc}") from None
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "未知错误").replace(key, "[REDACTED]")
         service_privacy.raise_if_authorization_unavailable(detail)
         raise AnalysisError(
-            f"LZStudio CLI失败：{service_privacy.public_error(detail[:1000], '未知错误')}"
+            f"LuluLab CLI失败：{service_privacy.public_error(detail[:1000], '未知错误')}"
         )
-    parsed = parse_json_output(completed.stdout)
+    parsed = parse_json_output(completed.stdout.replace(key, "[REDACTED]"))
     service_privacy.raise_if_authorization_unavailable(parsed)
+    for item in walk_dicts(parsed):
+        if item.get("success") is False or item.get("ok") is False or item.get("error"):
+            raise AnalysisError(service_privacy.public_error(
+                str(item.get("message") or item.get("error") or "LuluLab 返回失败响应。"),
+                "LuluLab 返回失败响应。",
+            ))
     return parsed
 
 
 def verify_key(cli: str, key: str) -> None:
     """Require a successful, non-generative remote authentication check."""
-    run_cli(cli, key, ["account", "--credits"], 30)
+    response = run_cli(cli, key, ["user", "--credits"], 30)
+    balance = response.get("balance")
+    if response.get("ledgerType") != "Credits" or isinstance(balance, bool) or not isinstance(balance, (int, float)):
+        raise AnalysisError("LuluLab user --credits 未返回文档规定的有效鉴权响应。")
 
 
 def display_model(config: Mapping[str, Any]) -> str:
@@ -398,6 +412,14 @@ def raw_storyboard_specs(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def analysis_cut_candidates(technical: Mapping[str, Any]) -> list:
+    limit = technical.get('analysisDuration')
+    cuts = technical.get('candidateCuts', [])
+    if not isinstance(limit, (int, float)):
+        return cuts
+    return [cut for cut in cuts if not isinstance(cut, bool) and isinstance(cut, (int, float)) and 0 <= cut < limit]
+
+
 def build_input(
     manifest: Mapping[str, Any],
     media: Mapping[str, Any],
@@ -437,7 +459,7 @@ def build_input(
             "targetLanguage": str(config.get("targetLanguage", "跟原视频一致")),
             "otherRequirements": requirements,
             "blueprintSchemaVersion": "7.0" if str(config.get("plannerVersion", "2" if str(manifest.get("skillVersion", "")) == "5.1" else "1")) == "2" else "6.0",
-            "technicalCutCandidates": technical.get("candidateCuts", []),
+            "technicalCutCandidates": analysis_cut_candidates(technical),
             "targetDuration": config.get("duration"),
             # 以下字段只供服务端Code节点做确定性规划；工作流不会把它们注入Gemini Prompt。
             "sourceDuration": source_duration,
@@ -657,7 +679,7 @@ def main() -> int:
     parser.add_argument("--benchmark")
     parser.add_argument(
         "--benchmark-url",
-        help="Use an existing HTTP(S) benchmark video URL and skip the upload step.",
+        help="Validate a public HTTP(S) video URL; download, trim and upload when required.",
     )
     parser.add_argument("--resume-task-id")
     parser.add_argument("--cli")
@@ -706,13 +728,21 @@ def main() -> int:
         else:
             if not args.benchmark and not args.benchmark_url:
                 raise AnalysisError("首次提交必须提供--benchmark或--benchmark-url。")
-            reserve_submission(manifest_path, request_path)
-            if args.benchmark_url:
-                media = media_from_url(args.benchmark_url)
-            else:
-                prepared = prepare_benchmark_video(args.benchmark, output_dir=manifest_path.parent / "analysis" / "upload")
-                upload = run_cli(cli, key, ["upload", prepared["filePath"]], 600)
-                media = extract_media(upload, "video/mp4")
+            with prepare_analysis_video(
+                manifest['userConfig'], manifest_path.parent / 'analysis' / 'upload',
+                benchmark=args.benchmark, url=args.benchmark_url,
+            ) as prepared:
+                technical = manifest.setdefault('benchmarkVideo', {}).setdefault('analysis', {})
+                technical.setdefault('media', {})['duration'] = prepared['sourceDuration']
+                technical['analysisDuration'] = prepared['analysisDuration']
+                technical['candidateCuts'] = analysis_cut_candidates(technical)
+                generation_manifest.update(manifest_path, lambda data: data.setdefault('benchmarkVideo', {}).update({'analysis': technical}))
+                reserve_submission(manifest_path, request_path)
+                if prepared['directUrl']:
+                    media = media_from_url(prepared['directUrl'])
+                else:
+                    upload = run_cli(cli, key, ['upload', prepared['filePath']], 600)
+                    media = extract_media(upload, 'video/mp4')
             raw_storyboards: list[dict[str, Any]] = []
             if args.benchmark:
                 generation_manifest.update(manifest_path, lambda data: data.setdefault("benchmarkVideo", {}).update({"file": str(Path(args.benchmark).expanduser().resolve())}))

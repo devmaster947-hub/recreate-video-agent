@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the configured Lingzhi API key without submitting a paid task."""
+"""Verify the configured LuluLab API key without submitting a paid task."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def main() -> int:
     except service_privacy.AuthorizationUnavailableError as exc:
         parser.exit(1, f"{exc}\n")
     except (AnalysisError, OSError, ValueError, json.JSONDecodeError) as exc:
-        parser.exit(1, f"灵智 API Key 预检未通过：{exc}\n")
+        parser.exit(1, f"LuluLab API Key 预检未通过：{exc}\n")
 
 
 if __name__ == "__main__":

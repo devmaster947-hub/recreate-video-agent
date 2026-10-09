@@ -35,7 +35,7 @@ def resolve_ffmpeg(value: str | os.PathLike[str] | None = None) -> Path:
             else (Path.home() / ".local" / "bin" / "ffmpeg").resolve()
         )
     if not candidate.is_file() or not os.access(candidate, os.X_OK):
-        raise CompressionError("上传素材超过 20 MB，但未找到可执行的 FFmpeg。")
+        raise CompressionError("视频预处理未找到可执行的 FFmpeg。")
     return candidate
 
 
@@ -131,6 +131,8 @@ def prepare_benchmark_video(
         if output_dir is not None
         else Path(tempfile.gettempdir()) / "recreate-video-agent" / "benchmark-uploads"
     )
+    directory.mkdir(parents=True, exist_ok=True)
+    directory = Path(tempfile.mkdtemp(prefix="compress-", dir=directory))
     if normalize_container and original_bytes <= max_bytes:
         normalized = _available_output(source, directory)
         remux = _run(

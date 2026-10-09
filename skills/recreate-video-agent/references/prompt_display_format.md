@@ -53,4 +53,4 @@ python3 scripts/export_prompt_texts.py --manifest <manifest> --output-dir <task>
 Prompt已全部展示并导出备份；流程继续进入已授权的首次视频生成。
 ```
 
-展示完成后按`generation_rules.md`检测并调用第一个可用视频CLI。四家CLI都不可用时，将末句改为无CLI的手动交付说明，仍然完整展示Prompt，并按Segment列出所需参考图。
+展示完成后按`generation_rules.md`检测并调用第一个可用视频CLI。三家视频CLI都不可用时，将末句改为无CLI的手动交付说明，仍然完整展示Prompt，并按Segment列出所需参考图。

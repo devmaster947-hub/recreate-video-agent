@@ -20,25 +20,15 @@ def inspect(manifest_path: Path) -> dict[str, object]:
     manifest_path = manifest_path.expanduser().resolve()
     data = generation_manifest.load_manifest(manifest_path)
     model = str(data.get("userConfig", {}).get("videoModel", "seedance-2-fast"))
-    if local_video_cli.libtv_cli_available():
-        executable = str(local_video_cli.resolve_libtv_cli())
-        availability: dict[str, bool | None] = {
-            "libtv_cli": True,
-            "xiaoyunque_cli": None,
-            "dreamina_cli": None,
-        }
-        selected = "libtv_cli"
-        lower_priority_skipped = True
-    else:
-        local = local_video_cli.detect_video_providers(model)
-        availability = {"libtv_cli": False, **local}
-        executable = ""
-        selected = local_video_cli.resolve_generation_provider(availability=availability)
-        lower_priority_skipped = False
+    available = local_video_cli.lululab_cli_available()
+    availability = {"lululab_cli": available}
+    selected = "lululab_cli" if available else None
+    executable = str(local_video_cli.resolve_lululab_cli()) if available else ""
+    lower_priority_skipped = True
     return {
         "ok": True,
         "model": model,
-        "priority": list(local_video_cli.GENERATION_PROVIDER_ORDER),
+        "priority": ["lululab_cli"],
         "availability": availability,
         "selected": selected,
         "executable": executable,
