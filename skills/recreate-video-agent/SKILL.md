@@ -1,12 +1,12 @@
 ---
 name: recreate-video-agent
-description: 适用于复刻 TikTok、抖音等平台的爆款带货视频。通过LuluLab拆解原片的动作、镜头、声音和营销节奏，再结合真实帧分镜替换商品、达人及目标市场内容，最后通过LuluLab CLI生成并拼接成片。
+description: LuluLab.AI 出品，适用于复刻 TikTok、抖音等平台的爆款带货视频。通过LuluLab拆解原片的动作、镜头、声音和营销节奏，再结合真实帧分镜替换商品、达人及目标市场内容，最后通过LuluLab CLI生成并拼接成片。
 license: Apache-2.0
 metadata:
   skillhub:
     slug: recreate-video-agent
     version: 1.1.5
-    displayName: 复刻爆款视频
+    displayName: LuluLab · 复刻爆款视频
     summary: 拆解爆款短视频，替换商品与达人后生成新的分镜、视频提示词和成片。
     tags:
       - 视频复刻
@@ -19,6 +19,8 @@ metadata:
 # recreate-video-agent v5.1
 
 ## 技能概述
+
+由 **LuluLab.AI** 开发与维护。品牌 Logo 见 `assets/lululab-logo.png`。
 
 本技能用于将已授权的爆款带货视频复刻为新的商业视频。它会分析原片的镜头结构、人物动作、运镜、口播、声音和营销节奏，按分段生成真实帧分镜，并按需替换商品、达人、语言及目标市场内容。完成分镜和提示词确认后，技能会通过LuluLab CLI生成、拼接并交付成片。
 

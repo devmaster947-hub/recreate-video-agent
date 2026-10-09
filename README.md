@@ -1,4 +1,8 @@
-# AI Video Marketing Agent Skills 🚀
+# LuluLab.AI · Video Marketing Skills
+
+<p align="center"><img src="skills/recreate-video-agent/assets/lululab-logo.png" alt="LuluLab.AI" width="240"></p>
+
+Created and maintained by **LuluLab.AI**.
 
 AI agent skills for creating, analyzing, and automating short-form marketing videos.
 
@@ -107,9 +111,9 @@ For production-scale AI marketing video creation:
 
 ---
 
-# AI 视频营销 Agent Skills 🚀
+# LuluLab.AI · 视频营销技能
 
-用于创建、分析和自动化短视频营销内容的 AI Agent Skill 集合。
+由 **LuluLab.AI** 开发与维护，用于创建、分析和自动化短视频营销内容的 AI Agent Skill 集合。
 
 
 适用于：

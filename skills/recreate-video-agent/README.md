@@ -1,4 +1,8 @@
-# 复刻爆款视频 · LuluLab CLI
+# LuluLab.AI · 复刻爆款视频
+
+<p align="center"><img src="assets/lululab-logo.png" alt="LuluLab.AI" width="240"></p>
+
+由 **LuluLab.AI** 开发与维护。
 
 Skill调用名 `recreate-video-agent`，版本1.1.5。拆解、图片和视频均通过LuluLab CLI，工作流由CLI自动触发。
 

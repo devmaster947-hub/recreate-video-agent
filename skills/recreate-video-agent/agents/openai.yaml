@@ -1,4 +1,4 @@
 interface:
-  display_name: "复刻爆款视频"
+  display_name: "LuluLab · 复刻爆款视频"
   short_description: "拆解对标视频，替换商品和达人并生成成片"
   default_prompt: "使用 $recreate-video-agent 通过 LuluLab CLI 拆解并复刻视频，图片使用gpt-image-2-5-sunburst，视频使用Seedance2 Mini。"
