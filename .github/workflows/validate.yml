@@ -16,7 +16,7 @@ jobs:
           node-version: '20'
       - name: Install test dependencies
         run: |
-          python -m pip install pyyaml
+          python -m pip install pyyaml Pillow
       - name: Validate package and scan source
         run: python skills/recreate-video-agent/scripts/ci_validate.py
       - name: Run local tests without paid API calls
