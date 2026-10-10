@@ -16,6 +16,7 @@ jobs:
           node-version: '20'
       - name: Install test dependencies
         run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
           python -m pip install pyyaml Pillow
       - name: Validate package and scan source
         run: python skills/recreate-video-agent/scripts/ci_validate.py
