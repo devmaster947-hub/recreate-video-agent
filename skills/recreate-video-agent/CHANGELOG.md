@@ -1,3 +1,9 @@
+## 1.2.0 — GitHub installation and portable CLI candidate (2026-10-10)
+
+- Preserve the source workflow and task recovery rules while routing LuluLab task, upload and credit commands through the bundled Node.js client.
+- Add English and Chinese installation guides and update the Windows CLI guidance.
+- Preserve the existing English/Chinese interaction rules; no production paid task has been run for this candidate.
+
 ## 1.1.5 — LuluLab 图片模型切换（2026-10-09）
 
 - 图片生成与编辑仍使用 LuluLab CLI 的 ImageGenV2，模型改为 `gpt-image-2-5-sunburst`，分辨率保持 1K。

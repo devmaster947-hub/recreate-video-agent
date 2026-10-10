@@ -45,7 +45,8 @@ class LuluLabContractTests(unittest.TestCase):
         with patch.object(analysis.subprocess, "run", return_value=response) as run:
             result = analysis.run_cli("lululab", "test-key", ["task", "submit", "--workflow-id", "RecreateVideoPromptV3", "--input", "{}"], 30)
         self.assertEqual(result["id"], "task-1")
-        self.assertEqual(run.call_args.args[0], ["lululab", "task", "submit", "--api-key", "test-key", "--workflow-id", "RecreateVideoPromptV3", "--input", "{}"])
+        self.assertEqual(run.call_args.args[0][1:], ["lululab", "task", "submit", "--workflow-id", "RecreateVideoPromptV3", "--input", "{}"])
+        self.assertEqual(run.call_args.kwargs["env"]["LULULAB_API_KEY"], "test-key")
 
     def test_lululab_does_not_reuse_old_service_key(self):
         with tempfile.TemporaryDirectory() as td:

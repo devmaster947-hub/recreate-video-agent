@@ -6,7 +6,7 @@ V7从replication-package.json的entityContexts读取本段全部镜头及replace
 
 每段prompt以参考素材职责开头：一张target板锁定画面状态，产品图锁定产品；存在合规达人图时才说明其锁定外貌。不得在Prompt中把未实际提交的达人图写成参考素材。宫格时间标签仅用于定位，不能出现在成片。按真实shot局部时间逐项描述镜头，不设置宏观阶段数量上限。同镜头关键状态不虚构硬切，Segment边界不自动当切镜。
 
-Prompt说明文全部使用中文，包括参考素材职责、格式与风格、镜头、动作、运镜、节奏、音效和禁止项。只有角色实际说出的口播原文使用目标语言；shotId、beatId、utteranceId、creatorId、产品名、节点占位符与必要专有名词可保留原文。
+Prompt说明文使用目标视频语言，包括参考素材职责、格式与风格、镜头、动作、运镜、节奏、音效和禁止项；对白也使用目标视频语言。shotId、beatId、utteranceId、creatorId、产品名、节点占位符与必要专有名词可保留原文。交互语言只控制聊天展示，不改变已登记Prompt正文。
 
 明确起始状态→动作→结束状态、眼神、反应、停顿、情绪变化、节奏和切镜。完整保留cutPlan和dramaticBeats，未入宫格的镜头也必须写。对白逐句包含utteranceId、speakerId、局部时间、原文、情绪强度、是否出镜及lipSync。跨段保持同一Voice Setting；不得默认女性画外音、关闭BGM或将去字幕误为去人声。
 
@@ -14,7 +14,7 @@ Prompt说明文全部使用中文，包括参考素材职责、格式与风格�
 
 输出videoPrompts.segments，每段含segmentId/title/duration/globalStart/globalEnd/storyboardIds/creatorIds/productPresent/shotIds/beatIds/utteranceIds/prompt。local=global-globalStart，只转换一次；窗口和板ID不得改变。
 
-字幕与UI全部禁止；只有蓝图确认剧情作用且用户允许的金额特效可保留。声音时间轴不得生成可见文字。每段完整prompt在聊天独立text代码块展示。
+字幕与UI全部禁止；只有蓝图确认剧情作用且用户允许的金额特效可保留。声音时间轴不得生成可见文字。按 prompt_display_format.md 的交互语言规则展示并导出每段完整 prompt。
 
 结构化绑定可降低串声风险，不保证生成模型百分之百遵守；本版不新增音频参考、TTS或后期配音。
-V7每段使用完整镜头productIds决定productPresent，只提交replacementBindings中实际替换产品的referenceImages。原始对白保留在蓝图；目标语言对白仍逐条关联utteranceId/lineId。指令、描述用中文，不添加运行时语言检测。最终Prompt明确角色对应镜头、动作与产品持有者；不得把镜头人物并集解释为每一帧同时出现。
+V7每段使用完整镜头productIds决定productPresent，只提交replacementBindings中实际替换产品的referenceImages。原始对白保留在蓝图；目标语言对白仍逐条关联utteranceId/lineId。指令、描述使用目标视频语言；交互语言遵循 SKILL.md 的 Codex 配置优先规则，不按消息文字或操作系统语言重新检测。最终Prompt明确角色对应镜头、动作与产品持有者；不得把镜头人物并集解释为每一帧同时出现。

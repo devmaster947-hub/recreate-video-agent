@@ -1,0 +1,19 @@
+# Local caches and generated outputs
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+output/
+outputs/
+artifacts/
+
+# Local credentials
+.env
+.env.*
+!.env.example
+.recreate-video/
+config.local.json
+*.pem
+*.key

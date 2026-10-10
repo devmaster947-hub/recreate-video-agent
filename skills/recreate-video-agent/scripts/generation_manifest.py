@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from scripts import service_privacy
+    from scripts import interaction_language, service_privacy
 except ModuleNotFoundError:
+    import interaction_language  # type: ignore[no-redef]
     import service_privacy  # type: ignore[no-redef]
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
@@ -115,6 +116,8 @@ def load_manifest(path: str | Path) -> dict[str, Any]:
     config.setdefault("customRequirement", "")
     config.setdefault("targetCountry", "跟原视频一致")
     config.setdefault("targetLanguage", "跟原视频一致")
+    config["interactionLocale"] = interaction_language.resolve_interaction_locale(config.get("interactionLocale"))
+    config["interactionLanguage"] = interaction_language.resolve_interaction_language(config["interactionLocale"])
     config.setdefault("resolution", "720p")
     config.setdefault("qualityProfile", "fast")
     config.setdefault("fidelityMode", "high_fidelity")
@@ -452,6 +455,20 @@ def normalize_replacement_record(value: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def set_interaction_locale(path: str | Path, locale: str) -> Path:
+    """Update only chat language; preserve generation settings and task state."""
+    normalized = interaction_language.normalize_locale(locale)
+    if not normalized:
+        raise ValueError("A non-empty interaction locale is required.")
+
+    def mutate(data: dict[str, Any]) -> None:
+        config = data.setdefault("userConfig", {})
+        config["interactionLocale"] = normalized
+        config["interactionLanguage"] = interaction_language.resolve_interaction_language(normalized)
+
+    return update(path, mutate)
+
+
 def command_init(args: argparse.Namespace) -> Path:
     video_model = str(getattr(args, "video_model", "seedance-2-mini") or "seedance-2-mini")
     duration_mode = str(getattr(args, "duration_mode", "source") or "source")
@@ -459,6 +476,10 @@ def command_init(args: argparse.Namespace) -> Path:
     custom_requirement = str(getattr(args, "custom_requirement", "") or "")
     target_country = str(getattr(args, "target_country", "") or "跟原视频一致")
     target_language = str(getattr(args, "target_language", "") or "跟原视频一致")
+    interaction_locale = interaction_language.resolve_interaction_locale(
+        getattr(args, "interaction_locale", None),
+        configured_locale=getattr(args, "codex_locale", None),
+    )
     storyboard_validation_mode = str(getattr(args, "storyboard_validation_mode", "fast") or "fast")
     if storyboard_validation_mode not in {"fast", "strict"}:
         raise ValueError("storyboardValidationMode 必须是 fast 或 strict。")
@@ -498,6 +519,8 @@ def command_init(args: argparse.Namespace) -> Path:
                     "customRequirement": custom_requirement,
                     "targetCountry": target_country,
                     "targetLanguage": target_language,
+                    "interactionLocale": interaction_locale,
+                    "interactionLanguage": interaction_language.resolve_interaction_language(interaction_locale),
                     "resolution": "720p",
                     "qualityProfile": "fast",
                     "plannerVersion": "2",
@@ -1128,6 +1151,11 @@ def main() -> int:
     init.add_argument("--custom-requirement", default="")
     init.add_argument("--target-country", default="跟原视频一致")
     init.add_argument("--target-language", default="跟原视频一致")
+    init.add_argument("--interaction-locale", help="Explicit selected reply locale; overrides --codex-locale.")
+    init.add_argument("--codex-locale", help="Codex response locale explicitly supplied by the agent/host.")
+    language = sub.add_parser("set-interaction-locale")
+    language.add_argument("--manifest", required=True)
+    language.add_argument("--interaction-locale", required=True)
     init.add_argument("--storyboard-validation-mode", choices=("fast", "strict"), default="fast")
     board = sub.add_parser("add-storyboard")
     board.add_argument("--manifest", required=True)
@@ -1191,6 +1219,8 @@ def main() -> int:
     try:
         if args.command == "init":
             result = command_init(args)
+        elif args.command == "set-interaction-locale":
+            result = set_interaction_locale(args.manifest, args.interaction_locale)
         elif args.command == "add-storyboard":
             anchors_payload = json.loads(Path(args.anchors_file).read_text(encoding="utf-8")) if args.anchors_file else None
             anchors = anchors_from_payload(anchors_payload, args.storyboard_id) if anchors_payload is not None else None

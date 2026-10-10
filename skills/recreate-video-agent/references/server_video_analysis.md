@@ -33,9 +33,9 @@ Gemini成功返回videoBlueprint后，同一工作流立即进入“生成复刻
 兼容规则：同一plannerVersion内只能做不破坏协议的参数调优；不得删除/改名字段，也不得改变已发布模型的anchor数量或合法Segment时长范围。出现这类变化时新增Planner V2，保留V1供已发出的Skill继续使用。
 V2人物使用characterId，声源使用speakerId及可空characterId；每个镜头包含visibleCharacterIds和productIds，人物referenceTime提供源证据定位。详细字段和替换登记见entity_bindings.md。V2分析配置不把目标语言、目标产品或自定义替换要求注入原片事实；最终Prompt阶段再按用户要求适配。
 
-## LuluLab CLI 0.0.2 文档差异
+## LuluLab Node.js CLI
 
-CLI命令已经核对附件文档及二进制help：`upload <file>`、`task submit --workflow-id --input`（或`--input-file`）、`task fetch --id`、`user --credits`。上传响应的 `expiresAt` 归一化为现有工作流媒体对象的 `expiredAt`。
+随包 Node.js CLI 支持 `upload <file>`、`task submit --workflow-id --input`、`task fetch --id`、`user --credits`。上传响应提供媒体 `url` 和 `mimeType`；签名上传 URL 的失效时间不作为媒体失效时间。
 
 附件文档的拆解样例使用 `RecreateVideoPromptV2`，键名为 `benchmarkVideoUrl`，包含 `productBrief`、`creatorBrief`。本Skill的V3还依赖 `videoBlueprint`、`replicationPlan` 与 Planner 2 输出；不能只改工作流ID就替换为V2。客户端保留 `RecreateVideoPromptV3` 及原输入契约，直接交由 CLI 自动触发工作流，读取返回的拆解和规划结果；不要求用户部署工作流。
 

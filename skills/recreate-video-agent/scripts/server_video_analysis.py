@@ -283,26 +283,23 @@ def extract_replication_plan(response: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def bundled_cli_candidate(system_name: str | None = None, machine: str | None = None) -> Path | None:
-    system_value = system_name or platform.system()
-    architecture = (machine or platform.machine()).lower()
-    if system_value == "Windows" and architecture in {"amd64", "x86_64", "x64"}:
-        return Path(__file__).resolve().parent.parent / "cli" / "windows-x64" / "lululab.exe"
-    if system_value == "Darwin" and architecture in {"arm64", "aarch64"}:
-        return Path(__file__).resolve().parent.parent / "cli" / "macos-arm64" / "lululab"
-    return None
+    return Path(__file__).resolve().parent / "lululab_cli.mjs"
 
 
 def resolve_cli(explicit: str | None) -> str:
-    bundled = bundled_cli_candidate()
-    candidates = [explicit, os.environ.get("LULULAB_CLI"), bundled, shutil.which("lululab"), shutil.which("lululab.exe")]
+    bundled = Path(__file__).resolve().parent / "lululab_cli.mjs"
+    node = os.environ.get("LULULAB_NODE") or shutil.which("node")
+    if not node:
+        raise AnalysisError("未发现 Node.js 20+；请按官方方式安装后重试。")
+    candidates = [explicit, os.environ.get("LULULAB_CLI"), bundled]
     for value in candidates:
         if not value:
             continue
         path = Path(value).expanduser()
-        if path.is_file() and os.access(path, os.X_OK):
+        if path.is_file() and path.suffix == ".mjs":
             try:
                 completed = subprocess.run(
-                    [str(path), "task", "submit", "--help"],
+                    [str(node), str(path), "task", "submit", "--help"],
                     capture_output=True, text=True, check=False, timeout=30,
                 )
             except (OSError, subprocess.SubprocessError):
@@ -311,7 +308,7 @@ def resolve_cli(explicit: str | None) -> str:
             if completed.returncode == 0 and "workflow-id" in help_text and "--input" in help_text:
                 return str(path.resolve())
     raise AnalysisError(
-        "未发现支持`task submit/fetch`的LuluLab CLI；请在本机升级CLI或设置LULULAB_CLI。"
+        "未发现随 Skill 提供的 Node.js LuluLab CLI；请检查 scripts/lululab_cli.mjs。"
     )
 
 
@@ -335,11 +332,14 @@ def load_key() -> str:
 
 
 def run_cli(cli: str, key: str, arguments: list[str], timeout: float) -> dict[str, Any]:
-    prefix = 2 if arguments and arguments[0] == "task" else 1
-    command = [cli, *arguments[:prefix], "--api-key", key, *arguments[prefix:]]
+    node = os.environ.get("LULULAB_NODE") or shutil.which("node")
+    if not node:
+        raise AnalysisError("未发现 Node.js 20+。")
+    command = [str(node), cli, *arguments]
+    child_env = {**os.environ, "LULULAB_API_KEY": key}
     try:
         completed = subprocess.run(
-            command, capture_output=True, text=True, check=False, timeout=timeout, shell=False,
+            command, capture_output=True, text=True, check=False, timeout=timeout, shell=False, env=child_env,
         )
     except subprocess.TimeoutExpired:
         raise AnalysisError(f"LuluLab CLI调用超时（{timeout:g}秒）。") from None
@@ -366,7 +366,7 @@ def verify_key(cli: str, key: str) -> None:
     """Require a successful, non-generative remote authentication check."""
     response = run_cli(cli, key, ["user", "--credits"], 30)
     balance = response.get("balance")
-    if response.get("ledgerType") != "Credits" or isinstance(balance, bool) or not isinstance(balance, (int, float)):
+    if isinstance(balance, bool) or not isinstance(balance, (int, float)):
         raise AnalysisError("LuluLab user --credits 未返回文档规定的有效鉴权响应。")
 
 

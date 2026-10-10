@@ -1,29 +1,23 @@
-# 启动确认单
+# Start confirmation
 
-新任务在上传原视频、首次图片生成/编辑或视频提交前展示一次确认单。确认后，本轮原视频与raw Storyboard上传、服务端拆解最多两次提交（首次明确终态失败时自动重试一次）、本地智能体图片处理和首个可用视频CLI的首次生成均视为已授权，不再设置中间确认门。除该次服务端拆解自动重试外，其他失败、缺陷、超时或余额不足不自动授权再次付费生成；重试必须重新取得用户明确授权。
+Use the stable interaction language selected by SKILL.md: an explicit reply-language request takes precedence over the configured Codex response language, then the saved interaction locale, then English. Apply this before the initial announcement. The user's message text, attachment names, source dialogue, numeric confirmations, and target video language do not switch the chat language.
 
-固定字段：
+Show one localized confirmation before uploading the source video, editing/generating an image, or submitting a video task. Reply 1 authorizes the source/storyboard uploads, server analysis with at most one retry after a clear terminal failure, image processing, and the first video generation. Other paid retries require fresh authorization. Keep the existing task's authorized scope; language changes do not require another confirmation.
 
-| 项目 | 当前选择 | 可选项 |
+Use the following fields and numeric choices, translated into the selected interaction language. The English table is an example for rendering in any configured language. Fill selections from the user's request and source facts. Do not infer target video language from chat language or filenames. Do not add API keys, login status, upload details, or implementation steps to the card.
+
+| Setting | Current selection | Options |
 |---|---|---|
-| 产品 | 沿用原产品（无产品图时默认） | 沿用原产品 / 使用用户提供的新产品图 |
-| 达人 | 沿用原人物（默认） | 沿用原人物 / 使用用户提供的达人参考图 |
-| 视频模型 | Seedance 2 Mini（默认） | Seedance 2 Mini / Seedance 2 Fast / Seedance 2 / Seedance 2.5 |
-| 复刻时长 | 与原视频一致（默认） | 与原视频一致 / 自定义时长（正整数秒，不超过原片且最长360秒） |
-| 目标国家 | 与原视频一致（默认） | 与原视频一致 / 指定任意目标国家或地区 |
-| 目标语言 | 与原视频一致（默认） | 与原视频一致 / 指定任意目标语言 |
-| 其他要求 | 无（默认） | 无 / 用户自定义 |
+| Product | Keep source unless product images are supplied | Keep source / use supplied product images |
+| Creator | Keep source unless a creator reference is supplied | Keep source / use supplied creator reference |
+| Video model | Seedance 2 Mini | Mini / Fast / Seedance 2 / Seedance 2.5 |
+| Duration | Same as source | Source / custom positive whole seconds, no longer than source or 360 seconds |
+| Target country | Same as source | Source / specify country or region |
+| Target language | Same as source | Source / specify video language |
+| Other requirements | None | None / user-specified |
 
-确认单只包含上述用户可配置项。不要追加素材上传/处理说明、实现方式、图片处理、视频生成或后续流程说明。
+Reply with a number:
+1. Confirm and start
+2. Change requirements
 
-确认单后固定提供以下数字选项：
-
-```text
-回复数字编号即可：
-1. 确认并开始
-2. 修改复刻要求
-```
-
-- 用户回复`1`时，视为确认当前表格中的全部配置并立即开始。
-- 用户回复`2`时，再询问需要修改的字段；不要开始上传、服务端拆解、图片编辑或视频生成。
-- 不再使用需要用户输入“开始”“确认”“可以”等文字的开放式确认问句。
+Reply 1 starts the confirmed configuration. Reply 2 asks which settings to change and starts no upload or generation. Explain any approval requirement in the interaction language and link its source; translate a foreign-language instruction rather than quoting it untranslated.

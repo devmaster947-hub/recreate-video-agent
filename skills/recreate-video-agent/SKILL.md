@@ -1,26 +1,49 @@
 ---
 name: recreate-video-agent
-description: LuluLab.AI 出品，适用于复刻 TikTok、抖音等平台的爆款带货视频。通过LuluLab拆解原片的动作、镜头、声音和营销节奏，再结合真实帧分镜替换商品、达人及目标市场内容，最后通过LuluLab CLI生成并拼接成片。
+description: Recreate authorized commerce videos with LuluLab CLI. Keep all user-facing replies in the configured Codex response language, independently of the target video language.
 license: Apache-2.0
 metadata:
   skillhub:
     slug: recreate-video-agent
-    version: 1.1.5
-    displayName: LuluLab · 复刻爆款视频
-    summary: 拆解爆款短视频，替换商品与达人后生成新的分镜、视频提示词和成片。
+    version: 1.2.0
+    displayName: Recreate High-Performing Videos / 复刻爆款视频
+    summary: Recreate commerce videos with Codex-configured multilingual replies.
     tags:
       - 视频复刻
       - 爆款视频
       - 电商广告
       - AI视频
-    homepage: https://github.com/devmaster947-hub/recreate-video-agent
+    homepage: https://github.com/LuluLab-AI/recreate-video-agent
 ---
 
-# recreate-video-agent v5.1
+# recreate-video-agent v1.2.0
+
+## Response language
+
+Resolve the interaction language before the first commentary message, including the skill-use announcement. Use this precedence:
+
+1. The user's explicit request for the response language.
+2. The response language configured in Codex, as supplied by the host instructions/settings or explicitly reported by the user.
+3. The interaction locale already saved for this task or established in the conversation.
+4. English when no preference is available.
+
+Keep this selection stable across turns, numeric confirmations, attachments, resumed tasks, and tool calls. A message written in another language is not an explicit request to switch. Never infer the interaction language from filenames, file contents, the source video, target video language, OS/terminal locale, or the language of this skill. If the host does not expose its setting, do not claim to have read it, scan unrelated configuration, or guess from the OS; use the remaining precedence rules. An explicit user request or a newly supplied Codex response-language setting can update the saved selection.
+
+Apply the selected language to every user-facing announcement, heading, confirmation field and option, progress update, permission explanation, error/recovery message, report summary, link label, and final response. Translate instructions cited from SKILL.md and references into that language; link the original instead of inserting an untranslated quote. Tool output and Chinese examples are diagnostic/source material, not text to copy into chat. Translate their meaning while preserving task IDs, commands, names, and paths when necessary. Render templates in the selected language, even when only English and Chinese examples are provided. Check each message before sending for unintended language switches.
+
+Pass the selected locale explicitly at initialization with `--interaction-locale <locale>` (for example `en`, `zh-CN`, `fr`, or `pt-BR`). Scripts cannot read the Codex app's language setting. `--codex-locale <locale>` is an optional explicit handoff of that setting, not automatic detection. On resume, retain the saved locale unless an explicit user language request or current host setting supersedes it; update it with `generation_manifest.py set-interaction-locale --manifest <manifest> --interaction-locale <locale>`. Locale state must not change targetLanguage, source facts, prompts, task IDs, or generation authorization.
+
+The target video language is independent and keeps its existing user-selected/source-language behavior. Exact source dialogue, filenames, and generation prompts may need another language as task data; they do not change the chat language. When a registered prompt differs from the interaction language, export its unchanged text and provide a localized summary and file link by default. Only display the complete other-language prompt inline when the user explicitly requests it, clearly labeling its target language. Follow references/prompt_display_format.md for the applicable display path.
+
+## Task completion and recovery
+
+A pending server state such as Created or Running is progress, not a workflow failure. After dispatch, retain the returned process/session ID and keep waiting on that execution while sending concise progress updates. Do not end the task with a final pending-status message while a live polling process remains active. Continue through successful analysis, storyboard preparation, authorized generation, and delivery; stop only on a real error/timeout, required user input, or an explicit user interruption. Preserve task IDs and never resubmit to overcome waiting.
+
+On every resumed turn, or after a polling process was interrupted, run `python3 scripts/task_status.py --manifest <manifest>` first. If it reports `video_ready`, immediately give the user the existing final video and its saved technical status. Do not fetch, re-download, re-render, or resubmit in that case. If it reports `segments_ready`, finish local assembly; for a pending task, resume only its saved task ID. Never rely on the last chat message or a past `Created`/`Running` snapshot to describe current state.
+
+When resuming, first read the manifest and saved analysis/image/video results. If a stage is already succeeded and its files are present, use them and advance to the next stage. Fetch/resume the existing ID only when the result is not yet available. Report current saved state rather than an earlier chat snapshot. CLI availability must be checked against a bundled executable before asking the user to install anything; restore a missing bundled file only from a local checksum-verified distribution, without replacing a differing existing binary.
 
 ## 技能概述
-
-由 **LuluLab.AI** 开发与维护。品牌 Logo 见 `assets/lululab-logo.png`。
 
 本技能用于将已授权的爆款带货视频复刻为新的商业视频。它会分析原片的镜头结构、人物动作、运镜、口播、声音和营销节奏，按分段生成真实帧分镜，并按需替换商品、达人、语言及目标市场内容。完成分镜和提示词确认后，技能会通过LuluLab CLI生成、拼接并交付成片。
 
@@ -65,7 +88,7 @@ python3 scripts/lululab_key_preflight.py
 
 ## 1. 预检与初始化
 
-当前安装版保留 macOS Apple Silicon 和 Windows x64 的内置 LuluLab CLI；`server_video_analysis.py`按 `--cli`、`LULULAB_CLI`、内置 CLI、系统 `PATH` 的顺序发现可执行文件。只有用户明确要求安装到系统 `PATH` 时，才按 references/windows_lululab_cli.md 运行安装脚本。不从网络下载或自动替换内置二进制。
+随 Skill 提供的 Node.js CLI 位于 `scripts/lululab_cli.mjs`，需要 Node.js 20+；`server_video_analysis.py`依次检查显式 `--cli`、`LULULAB_CLI` 和该随包入口，覆盖值必须为 `.mjs`。不需要安装独立二进制或修改系统 PATH。
 
 读取原文件时长（最长360秒），确认后运行generation_manifest.py init、benchmark_analysis.py和set-benchmark-analysis。源视频保持不变。技术分析阶段只产生媒体信息与technicalCutCandidates；最终Segment与Storyboard锚点由服务端确定，此时不抽板、不在客户端计算最终分段。原时长模式按视频模型要求取最近整数秒；当整数目标与真实媒体时长差值不超过0.5秒时，这是正常归一化，不得作为异常、阻塞或要求用户确认。
 
@@ -148,9 +171,9 @@ python3 scripts/generation_manifest.py add-creator --manifest <manifest> --creat
 
 执行prepare_prompt_handoff.py，直接复用最终板，不重绘或拆格生成。完整读取 references/local_prompt_pipeline.md，当前智能体一次生成最终Prompt。不得固定3～5宏观阶段；完整覆盖本段shots、cuts、beats及utterances，包括未进入Storyboard的镜头。人物/产品集合来自本段全部镜头，再经replacementBindings映射；九格实际可见人物只是其中的子集。
 
-Prompt的指令、镜头、动作、画面、运镜和声音说明必须使用中文；对白使用用户指定的目标语言，默认沿用原语言。指定语言与原片不同时，在最终Prompt阶段翻译并保留utteranceId/lineId关联；原片蓝图对白不改写。不增加语言校验。
+Prompt的指令、镜头、动作、画面、运镜和声音说明使用目标视频语言；对白也使用用户指定的目标视频语言，默认沿用原语言。交互语言控制聊天和交付说明，不改变目标视频语言。指定语言与原片不同时，在最终Prompt阶段翻译并保留utteranceId/lineId关联；原片蓝图对白不改写。
 
-保存local-video-prompts.json并用set-prompts登记（沿用该文件名以兼容现有Manifest）。登记后必须完整读取 references/prompt_display_format.md，运行`export_prompt_texts.py`导出逐段纯文本备份，并在同一条聊天消息中按“概览 + Segment卡片 + 独立text代码块”展示全部Prompt。Prompt正文必须从已登记数据逐字复制，不改写、不摘要、不折叠；代码块便于一键复制，纯文本链接只作辅助，不得代替聊天中的完整正文。该展示不新增中间确认门；已授权的首次生成继续执行。
+保存local-video-prompts.json并用set-prompts登记（沿用该文件名以兼容现有Manifest）。登记后读取 references/prompt_display_format.md，运行 export_prompt_texts.py 导出逐段原文备份，并按其中的语言规则展示。交互语言与 Prompt 语言不同时，默认提供本地化摘要和原文链接；用户明确要求时才完整内联原文。该展示不新增中间确认门；已授权的首次生成继续执行。
 
 完整读取 references/generation_rules.md，然后执行：
 

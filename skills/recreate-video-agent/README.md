@@ -1,23 +1,55 @@
-# LuluLab.AI · 复刻爆款视频
+# Recreate Video Agent
 
-<p align="center"><img src="assets/lululab-logo.png" alt="LuluLab.AI" width="240"></p>
+## Overview
 
-由 **LuluLab.AI** 开发与维护。
+This Skill recreates an **authorized** commerce video using a source video, product and creator references, a reviewed segment plan, storyboards and LuluLab generation. It is for creators and merchants with permission to use the source material. The Agent Skills root is this repository's `skills/recreate-video-agent/` folder, containing `SKILL.md`.
 
-Skill调用名 `recreate-video-agent`，版本1.1.5。拆解、图片和视频均通过LuluLab CLI，工作流由CLI自动触发。
+## Key Features
 
-- 拆解：RecreateVideoPromptV3，保持原预处理、分段规划和恢复协议。
-- 图片：ImageGenV2，gpt-image-2-5-sunburst、1K。
-- 视频：VideoGenV2，Seedance2 Mini（seedance-2-mini）、720p、每段4–15秒；20秒任务保留11秒+9秒规划。
+- Preprocesses and analyzes the source video through `RecreateVideoPromptV3`.
+- Builds segment storyboards, binds product and creator references, and presents prompts for confirmation.
+- Uses `ImageGenV2` for image work and `VideoGenV2` with Seedance2 Mini for video generation. It saves task IDs to recover work without blind paid retries.
+- Keeps interaction language separate from the target video's language under the existing Skill rules.
 
-不调用原生图片工具，也不自动换视频平台。工作流ID内置，不要求客户端导入或部署工作流。
+## Requirements
 
-解压客户交付ZIP，把 `recreate-video-agent` 文件夹复制到Codex skills目录（macOS `~/.codex/skills/`，Windows `%USERPROFILE%\.codex\skills\`）。需要Python3、FFmpeg、FFprobe；内置macOS arm64与Windows x64的LuluLab CLI 0.0.2。
+A file-capable Agent Skills host such as Codex or Claude Code, Python 3, FFmpeg/FFprobe, Node.js 20+, macOS or Windows, network access to LuluLab, and a LuluLab API Key for the first service call are required. Other agents need an equivalent file-based Skill mechanism. The Node.js CLI is bundled at `scripts/lululab_cli.mjs`; there is no npm or `npx` install step.
 
-Key使用LULULAB_API_KEY或本机私有 `~/.recreate-video-lululab/config.json` 的apiKey，不写入聊天、manifest或交付物。可用LULULAB_CLI指定可执行路径。工作流ID环境变量覆盖为可选项。
+## Installation
 
-一次启动确认后执行已授权的首次生成。拆解仅在服务端明确终态失败时自动重试一次；图片和视频不自动付费重试，已有taskId只恢复查询。
+Ask your agent:
 
-调用：`$recreate-video-agent 帮我复刻这个视频`。详细流程见SKILL.md；任务接口见references/lululab_cli_contract.md。
+> Please install this LuluLab Skill into my current AI agent environment: https://github.com/LuluLab-AI/recreate-video-agent . Follow the project's official installation instructions.
 
-本地回归：`python3 -m unittest discover -s tests -p 'test_*.py'`。Windows包按原附件SHA256校验，未在Windows运行。
+The Agent should review the repository, then copy the **whole** `recreate-video-agent/` folder into its current user Skill directory under the name `recreate-video-agent`. Agent locations vary, so confirm the current location in that agent's documentation. Keep `SKILL.md`, `scripts/`, `references/`, `core/`, `utils/` and `assets/` together. Do not copy only `SKILL.md` or the repository's `skills/` wrapper. If the same Skill is already installed, compare versions and ask before replacement; leave other Skills alone. Run `node scripts/lululab_cli.mjs --help` and `python3 scripts/video_cli_preflight.py --help` from the Skill root, reload the agent's Skill list, and verify discovery.
+
+## Quick Start
+
+- “Use $recreate-video-agent to recreate this authorized 20-second product video with my new product photos. Show the plan before paid generation.”
+- “Recreate this authorized commerce video for an English-speaking US audience, but reply to me in Chinese.”
+
+The first confirmation covers source upload and the initial paid image/video generation; subsequent paid retries require a new decision. See [SKILL.md](SKILL.md).
+
+## Configuration
+
+The bundled CLI supports `upload <file>`, `user --credits`, `task submit --workflow-id <id> --input <JSON>` and `task fetch --id <id>`. Set `LULULAB_API_KEY` locally or use the existing private `~/.recreate-video-lululab/config.json` with an `apiKey` field. Do not put a Key in GitHub, a manifest, prompt or command argument. `LULULAB_NODE` may point to Node.js when it is absent from `PATH`; `LULULAB_CLI` may point only to another reviewed `.mjs` entry. See [the CLI contract](references/lululab_cli_contract.md).
+
+## Supported Languages
+
+English and Chinese interaction follow the Skill's existing language priority rules. A requested target video language is independent from the conversation language.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Skill is not recognized | Confirm the `recreate-video-agent` root and its `SKILL.md`; reload discovery. |
+| CLI is missing | Check Node.js 20+, `scripts/lululab_cli.mjs`, and `--help`. |
+| API Key is missing | Configure `LULULAB_API_KEY` locally before the first service call. |
+| Network request fails | Check service access and resume the saved task ID before any resubmission. |
+| Model call fails | Inspect the terminal task status; do not switch models or repeat a paid task silently. |
+| Dependency is missing | Install the reported Python, FFmpeg or FFprobe dependency and rerun preflight. |
+
+## Support
+
+Website: https://lululab.ai  
+Email: contact@lululab.ai

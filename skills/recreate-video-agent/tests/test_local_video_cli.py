@@ -99,7 +99,7 @@ class LocalVideoCliTests(unittest.TestCase):
         responses=[subprocess.CompletedProcess([],0,"--workflow-id --input", ""),subprocess.CompletedProcess([],0,"--id", "")]
         with patch.object(local_video_cli, "resolve_lululab_cli", return_value=Path("lululab")), patch.object(local_video_cli.subprocess, "run", side_effect=responses) as run:
             self.assertTrue(local_video_cli.lululab_cli_available())
-        self.assertEqual([call.args[0][1:3] for call in run.call_args_list], [["task","submit"],["task","fetch"]])
+        self.assertEqual([call.args[0][2:4] for call in run.call_args_list], [["task","submit"],["task","fetch"]])
 
     def test_submit_video_passes_every_reference_as_repeated_image_argument(self):
         with tempfile.TemporaryDirectory() as td:

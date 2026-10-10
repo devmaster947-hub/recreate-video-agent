@@ -124,18 +124,11 @@ def resolve_lululab_cli(*, cli_path: str | os.PathLike[str] | None = None) -> Pa
         if configured:
             candidate = Path(configured).expanduser().resolve()
         else:
-            architecture = platform.machine().lower()
-            bundled: Path | None = None
-            if platform.system() == "Darwin" and architecture in {"arm64", "aarch64"}:
-                bundled = SKILL_ROOT / "cli" / "macos-arm64" / "lululab"
-            elif platform.system() == "Windows" and architecture in {"amd64", "x86_64", "x64"}:
-                bundled = SKILL_ROOT / "cli" / "windows-x64" / "lululab.exe"
-            discovered = shutil.which("lululab") or shutil.which("lululab.exe")
-            candidate = bundled if bundled and bundled.is_file() else Path(discovered).resolve() if discovered else Path()
-    if not candidate.is_file() or candidate.stat().st_size <= 0:
-        raise LocalVideoCliError("未发现可执行 CLI：lululab")
-    if platform.system() != "Windows" and not os.access(candidate, os.X_OK):
-        raise LocalVideoCliError(f"CLI 不可执行：{candidate}")
+            candidate = SKILL_ROOT / "scripts" / "lululab_cli.mjs"
+    if not candidate.is_file() or candidate.suffix != ".mjs" or candidate.stat().st_size <= 0:
+        raise LocalVideoCliError("未发现 Node.js LuluLab CLI：scripts/lululab_cli.mjs")
+    if not (os.environ.get("LULULAB_NODE") or shutil.which("node")):
+        raise LocalVideoCliError("未发现 Node.js 20+。")
     return candidate.resolve()
 
 
@@ -158,8 +151,9 @@ LULULAB_GENERATION_UNAVAILABLE = "未发现支持 task submit/fetch 的 LuluLab 
 def lululab_cli_available(*, cli_path: str | os.PathLike[str] | None = None) -> bool:
     try:
         executable = resolve_lululab_cli(cli_path=cli_path)
+        node = os.environ.get("LULULAB_NODE") or shutil.which("node")
         for command, required in (("submit", ("--workflow-id", "--input")), ("fetch", ("--id",))):
-            result = subprocess.run([str(executable), "task", command, "--help"], capture_output=True, text=True, timeout=30)
+            result = subprocess.run([str(node), str(executable), "task", command, "--help"], capture_output=True, text=True, timeout=30)
             text = result.stdout + result.stderr
             if result.returncode != 0 or not all(flag in text for flag in required):
                 return False

@@ -1,7 +1,0 @@
-{
-  "lululabVersion": "0.0.2",
-  "sha256": {
-    "macos-arm64/lululab": "4689fa8d5f69c2acebba8d78056692b027ce77730712709d5f9a359e2a0a2f3e",
-    "windows-x64/lululab.exe": "9ef8120990fff7b3fdc88c62119c385080945f834401227adcc712f176a27926"
-  }
-}

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-SUPPORT_MESSAGE = "skill异常，请联系管理员处理，微信：marlon1102"
+SUPPORT_MESSAGE = "The service is unavailable. Please contact the administrator on WeChat: marlon1102."
 
 _EXHAUSTED_CODES = {
     "402",
@@ -78,7 +78,7 @@ def is_authorization_unavailable(value: Any) -> bool:
     return normalized in _EXHAUSTED_CODES or any(pattern.search(text) for pattern in _EXHAUSTED_PATTERNS)
 
 
-def public_error(value: Any, fallback: str = "服务调用失败。") -> str:
+def public_error(value: Any, fallback: str = "Service request failed.") -> str:
     if is_authorization_unavailable(value):
         return SUPPORT_MESSAGE
     text = str(value).strip() if value is not None else ""

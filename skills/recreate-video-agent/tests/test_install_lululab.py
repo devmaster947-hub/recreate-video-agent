@@ -13,6 +13,7 @@ from scripts.install_lululab import (
     PATH_BLOCK_START,
     default_install_dir,
     ensure_installed,
+    InstallError,
 )
 
 
@@ -97,17 +98,13 @@ class InstallTests(unittest.TestCase):
 
     def test_bundled_windows_binary_installs_byte_for_byte(self):
         with tempfile.TemporaryDirectory() as directory:
-            result = ensure_installed(
-                system="Windows",
-                machine="AMD64",
-                skill_root=Path(__file__).resolve().parents[1],
-                install_dir=Path(directory) / "bin",
-                persist_path=False,
-                verify=False,
-            )
-            installed = Path(str(result["installedPath"]))
-            bundled = Path(__file__).resolve().parents[1] / "cli" / "windows-x64" / "lululab.exe"
-            self.assertEqual(installed.read_bytes(), bundled.read_bytes())
+            with self.assertRaises(InstallError):
+                ensure_installed(
+                    system="Windows", machine="AMD64",
+                    skill_root=Path(__file__).resolve().parents[1],
+                    install_dir=Path(directory) / "bin", persist_path=False, verify=False,
+                )
+            self.assertFalse(list(Path(directory).iterdir()))
 
     def test_rejects_tampered_bundle(self):
         with tempfile.TemporaryDirectory() as directory:

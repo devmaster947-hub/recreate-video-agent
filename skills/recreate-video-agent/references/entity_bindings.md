@@ -34,6 +34,6 @@ python3 scripts/generation_manifest.py set-replacement-bindings --manifest <mani
 
 当前人物图策略不变。若策略要求人物图，在映射确定后先生成/登记，再编辑相应分镜。用户提供图必须登记到对应targetId；单段无用户图不新增人物图。
 
-prepare_prompt_handoff.py在replication-package.json写入entityContexts：包含全镜头、来源IDs、目标creatorIds、替换映射及产品图清单。使用它编写完整Prompt，九格实际可见人物只是完整集合的子集。对白原文保留，目标语言转换在最终Prompt进行；说明中文，不做语言校验。
+prepare_prompt_handoff.py在replication-package.json写入entityContexts：包含全镜头、来源IDs、目标creatorIds、替换映射及产品图清单。使用它编写完整Prompt，九格实际可见人物只是完整集合的子集。对白原文保留，目标语言转换在最终Prompt进行；说明文也使用目标视频语言，不做语言校验。
 
 分镜编辑后的fast/strict检查和视频生成后检查完全沿用原规则。
